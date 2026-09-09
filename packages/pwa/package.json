@@ -1,0 +1,49 @@
+{
+  "name": "@sendstack/pwa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Drop-in PWA layer for a Next.js App Router project: a configurable Workbox service worker, its build step, install and push hooks, and VAPID key generation.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sw": "./src/sw/create.js",
+    "./build": "./src/build.mjs",
+    "./vapid": {
+      "types": "./src/vapid.d.ts",
+      "default": "./src/vapid.mjs"
+    },
+    "./vapid-shape": {
+      "types": "./src/vapid-shape.d.ts",
+      "default": "./src/vapid-shape.mjs"
+    }
+  },
+  "bin": {
+    "sendstack-pwa": "./bin/cli.mjs"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "workbox-background-sync": "^7.4.1",
+    "workbox-build": "^7.4.1",
+    "workbox-cacheable-response": "^7.4.1",
+    "workbox-core": "^7.4.1",
+    "workbox-expiration": "^7.4.1",
+    "workbox-precaching": "^7.4.1",
+    "workbox-routing": "^7.4.1",
+    "workbox-strategies": "^7.4.1"
+  },
+  "peerDependencies": {
+    "react": ">=19"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.7",
+    "@types/web-push": "^3.6.4",
+    "typescript": "~5.9.3",
+    "web-push": "^3.6.7"
+  }
+}

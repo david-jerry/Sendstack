@@ -1,0 +1,1 @@
+ALTER TABLE "campaigns" ADD COLUMN "email_template" text;

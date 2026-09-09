@@ -1,0 +1,158 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/**
+ * The palette and the light/dark switch live in @sendstack/theme, so a new
+ * surface gets both from one import plus one provider.
+ *
+ * Imported by relative path rather than by package name: Tailwind v4 resolves
+ * `@import` itself, and a bare specifier through pnpm's symlinked store is not
+ * something to rely on for the file that decides whether the app has any
+ * colours at all.
+ */
+@import "../../../../packages/theme/src/tokens.css";
+
+/**
+ * Tailwind v4 discovers source files by walking out from this stylesheet and
+ * skipping node_modules — which means the theme package's components would
+ * never be scanned and every class in them would be missing from the bundle.
+ * The toggle would render as unstyled markup with no error anywhere.
+ */
+@source "../../../../packages/theme/src";
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    /* The whole UI sits a step below default browser size: this is a dense,
+       information-first tool, and 13px body text is what lets four columns
+       coexist without any of them feeling starved. */
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Counts and dates line up column-to-column across every table and list. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklch, var(--color-primary) 16%, transparent);
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@layer components {
+  /**
+   * What you type in the composer.
+   *
+   * Mirrors `inlineEmailStyles` in @sendstack/email closely enough that the
+   * editor is a preview of the message rather than a different document —
+   * headings, list indents and quote rules line up with what actually gets
+   * sent. It is not pixel-identical, and does not need to be; the point is
+   * that nothing surprises you after you press send.
+   */
+  .prose-email :where(p) {
+    margin: 0 0 0.7em;
+  }
+  .prose-email :where(p:last-child) {
+    margin-bottom: 0;
+  }
+  .prose-email :where(h2) {
+    margin: 1em 0 0.45em;
+    font-size: 1.25em;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .prose-email :where(h3) {
+    margin: 0.85em 0 0.35em;
+    font-size: 1.08em;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+  .prose-email :where(ul, ol) {
+    margin: 0 0 0.7em;
+    padding-left: 1.35em;
+  }
+  .prose-email :where(ul) {
+    list-style: disc;
+  }
+  .prose-email :where(ol) {
+    list-style: decimal;
+  }
+  .prose-email :where(li) {
+    margin: 0 0 0.2em;
+  }
+  .prose-email :where(blockquote) {
+    margin: 0 0 0.7em;
+    padding: 0.1em 0 0.1em 0.7em;
+    border-left: 3px solid var(--color-border);
+    color: var(--color-muted-foreground);
+  }
+  .prose-email :where(a) {
+    color: var(--color-signal-info);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .prose-email :where(strong) {
+    font-weight: 600;
+  }
+
+  /* Tiptap renders an empty document as a single empty paragraph, so the
+     placeholder hangs off that rather than the input's own attribute. */
+  .prose-email:has(> p:only-child:empty)::before,
+  .prose-email > p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    color: color-mix(in oklch, var(--color-muted-foreground) 65%, transparent);
+    pointer-events: none;
+    float: left;
+    height: 0;
+  }
+}
+
+@layer utilities {
+  /**
+   * The splash screen's progress bar.
+   *
+   * A keyframe rather than a spinner: it has to animate before any JavaScript
+   * has run, on a page whose whole job is to exist while the server is still
+   * thinking. Travels further than its own width so the bar leaves and
+   * re-enters rather than bouncing, which reads as progress instead of as
+   * something stuck.
+   */
+  @keyframes splash {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(400%);
+    }
+  }
+
+  /* A quiet scrollbar — present when scrolling, invisible when idle. */
+  .scroll-subtle {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--color-foreground) 14%, transparent) transparent;
+  }
+  .scroll-subtle::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-subtle::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--color-foreground) 12%, transparent);
+    border-radius: 9999px;
+  }
+  .scroll-subtle::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

@@ -1,0 +1,1 @@
+DROP INDEX "contacts_created_at_idx";

@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    # The test job needs a real database, not just the migration job.
+    #
+    # The integration suites are the only tests that execute the SQL this app
+    # actually generates, and the bug that motivated them — a missing comma
+    # between two CTEs — typechecked, built, and passed every unit test. With
+    # no `DATABASE_URL` those suites used to skip, so CI reported green while
+    # proving nothing about any query. `test/database-suite.ts` now *fails*
+    # when `CI` is set and the variable is absent, which makes a missing
+    # service here a loud failure rather than a silent gap.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: sendstack
+          POSTGRES_PASSWORD: sendstack
+          POSTGRES_DB: sendstack
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sendstack"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://sendstack:sendstack@localhost:5432/sendstack
+      AUTH_SECRET: ci-placeholder-secret-at-least-32-characters-long
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      # The schema has to exist before the integration suites query it.
+      - name: Apply migrations
+        run: pnpm db:migrate
+
+      - name: Test
+        run: pnpm test
+
+      # Only the two bootstrap values, taken from the job env above. Everything
+      # else lives in the database, which is a useful assertion in itself: if
+      # the build ever starts needing more than this, configuration has leaked
+      # back into the environment. Neither value reaches a network here.
+      - name: Build
+        run: pnpm build
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: sendstack
+          POSTGRES_PASSWORD: sendstack
+          POSTGRES_DB: sendstack
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sendstack"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Proves the committed migrations apply cleanly to an *empty* database,
+      # in isolation from the test job's own migrate step — so a migration
+      # that only works against an already-populated schema fails here.
+      #
+      # It does NOT detect drift between `packages/db/src/schema` and the
+      # committed SQL: both jobs run the same committed files. Catching a
+      # schema change that was never generated needs a `drizzle-kit generate`
+      # step that fails when it produces a file, which needs the CLI to run
+      # non-interactively.
+      - name: Apply migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: postgresql://sendstack:sendstack@localhost:5432/sendstack

@@ -1,0 +1,2 @@
+CREATE INDEX "inbound_emails_status_thread_idx" ON "inbound_emails" USING btree ("status","thread_key");--> statement-breakpoint
+CREATE INDEX "outbound_provider_idx" ON "outbound_messages" USING btree ("provider_message_id");

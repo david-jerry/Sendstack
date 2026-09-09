@@ -1,0 +1,35 @@
+# Local Postgres and Redis for Sendstack development.
+#
+#   docker compose up -d
+#
+# Then give the setup wizard:
+#   Postgres  postgresql://sendstack:sendstack@localhost:5432/sendstack
+#   Redis     redis://localhost:6379
+#
+# Redis is optional — skip it and the inbox updates on navigation instead of
+# instantly. Everything else behaves identically.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: sendstack
+      POSTGRES_PASSWORD: sendstack
+      POSTGRES_DB: sendstack
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sendstack"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+volumes:
+  pgdata:

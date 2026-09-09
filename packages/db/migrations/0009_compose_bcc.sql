@@ -1,0 +1,1 @@
+ALTER TABLE "outbound_messages" ADD COLUMN "bcc_emails" text[] DEFAULT '{}'::text[] NOT NULL;

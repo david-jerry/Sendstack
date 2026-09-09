@@ -1,0 +1,165 @@
+/**
+ * The design tokens, and the light/dark switch they hang off.
+ *
+ * Lives in the theme package rather than an app's stylesheet so that adding
+ * light and dark mode to a new surface is one import plus one provider, with
+ * no palette to copy — copied palettes drift, and two apps disagreeing about
+ * what "muted" means is the kind of thing nobody notices until a screenshot.
+ *
+ * Requires Tailwind v4: import this *after* `@import "tailwindcss"` so the
+ * `@theme inline` block can see the utilities it is extending.
+ */
+
+/* Tailwind's `dark:` variant, keyed to the class next-themes sets on <html>. */
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.625rem;
+
+  /**
+   * Tells the browser which way its own chrome should render — scrollbars,
+   * form controls, the colour picker, spellcheck underlines. Without it a dark
+   * page gets a bright white scrollbar and a white date picker, which is the
+   * giveaway that dark mode was painted on rather than declared.
+   */
+  color-scheme: light;
+
+  --background: oklch(0.977 0.002 90);
+  --foreground: oklch(0.185 0.004 285);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.185 0.004 285);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.185 0.004 285);
+
+  --primary: oklch(0.21 0.006 285);
+  --primary-foreground: oklch(0.985 0 0);
+
+  --secondary: oklch(0.968 0.002 285);
+  --secondary-foreground: oklch(0.21 0.006 285);
+
+  --muted: oklch(0.968 0.002 285);
+  --muted-foreground: oklch(0.552 0.011 285);
+
+  --accent: oklch(0.965 0.003 285);
+  --accent-foreground: oklch(0.21 0.006 285);
+
+  --destructive: oklch(0.593 0.204 17);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --border: oklch(0.923 0.003 285);
+  --input: oklch(0.923 0.003 285);
+  --ring: oklch(0.708 0.011 285);
+
+  /* Signal colours. Used only for state, never for decoration. */
+  --signal-unread: oklch(0.588 0.222 12);
+  --signal-success: oklch(0.646 0.14 160);
+  --signal-warning: oklch(0.769 0.145 70);
+  --signal-info: oklch(0.588 0.14 254);
+
+  /**
+   * The navigation ground.
+   *
+   * Deliberately a step *darker* than `--background`, not lighter: the shell
+   * floats the content on top of the sidebar as a card, and a card only reads
+   * as raised if the surface behind it is the duller of the two.
+   */
+  --sidebar: oklch(0.962 0.002 90);
+  --sidebar-foreground: oklch(0.185 0.004 285);
+  --sidebar-primary: oklch(0.21 0.006 285);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.925 0.003 285);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285);
+  --sidebar-border: oklch(0.902 0.003 285);
+  --sidebar-ring: oklch(0.708 0.011 285);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: oklch(0.165 0.004 285);
+  --foreground: oklch(0.97 0.002 285);
+
+  --card: oklch(0.205 0.005 285);
+  --card-foreground: oklch(0.97 0.002 285);
+  --popover: oklch(0.205 0.005 285);
+  --popover-foreground: oklch(0.97 0.002 285);
+
+  --primary: oklch(0.94 0.002 285);
+  --primary-foreground: oklch(0.21 0.006 285);
+
+  --secondary: oklch(0.256 0.006 285);
+  --secondary-foreground: oklch(0.97 0.002 285);
+
+  --muted: oklch(0.256 0.006 285);
+  --muted-foreground: oklch(0.68 0.012 285);
+
+  --accent: oklch(0.26 0.006 285);
+  --accent-foreground: oklch(0.97 0.002 285);
+
+  --destructive: oklch(0.65 0.19 22);
+  --destructive-foreground: oklch(0.985 0 0);
+
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.55 0.01 285);
+
+  /* Lifted in dark: the same hue at the same lightness reads as muddy on a
+     dark ground, because the surrounding contrast is lower. */
+  --signal-unread: oklch(0.68 0.19 14);
+  --signal-success: oklch(0.7 0.13 160);
+  --signal-warning: oklch(0.8 0.13 72);
+  --signal-info: oklch(0.66 0.13 254);
+
+  /* Same inversion as light: the ground sits below the content card, so it is
+     the darker of the two here rather than the lighter. */
+  --sidebar: oklch(0.152 0.004 285);
+  --sidebar-foreground: oklch(0.97 0.002 285);
+  --sidebar-primary: oklch(0.94 0.002 285);
+  --sidebar-primary-foreground: oklch(0.21 0.006 285);
+  --sidebar-accent: oklch(0.262 0.006 285);
+  --sidebar-accent-foreground: oklch(0.97 0.002 285);
+  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-ring: oklch(0.55 0.01 285);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-signal-unread: var(--signal-unread);
+  --color-signal-success: var(--signal-success);
+  --color-signal-warning: var(--signal-warning);
+  --color-signal-info: var(--signal-info);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}

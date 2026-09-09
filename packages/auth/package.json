@@ -1,0 +1,33 @@
+{
+  "name": "@sendstack/auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "auth:generate": "npx @better-auth/cli@latest generate --config src/schema-reference.ts"
+  },
+  "dependencies": {
+    "@better-auth/passkey": "^1.7.2",
+    "@sendstack/config": "workspace:*",
+    "@sendstack/db": "workspace:*",
+    "@sendstack/email": "workspace:*",
+    "@sendstack/shared": "workspace:*",
+    "better-auth": "^1.7.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "drizzle-orm": "^0.45.2",
+    "next": "^16.3.4",
+    "typescript": "~5.9.3"
+  },
+  "peerDependencies": {
+    "next": ">=15"
+  }
+}

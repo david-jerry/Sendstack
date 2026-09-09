@@ -1,0 +1,194 @@
+"use client";
+
+import { useRef, useState, useTransition } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { ImageUp, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { DEFAULT_BRAND_COLOR, brandingFormSchema, isHexColor, type BrandingFormInput } from "@sendstack/shared";
+import { updateBranding } from "@/actions/settings";
+import { Button } from "@/components/ui/button";
+import { Field, invalid } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/input";
+import { NameInput } from "@/components/ui/name-input";
+import { CloudinaryFields } from "@/components/setup/cloudinary-fields";
+import { Help } from "@/components/setup/help";
+
+function AssetPicker({
+  name,
+  currentUrl,
+  accept,
+  hint,
+}: {
+  name: "logo" | "favicon";
+  currentUrl: string | null;
+  accept: string;
+  hint: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [removed, setRemoved] = useState(false);
+  const shown = preview ?? (removed ? null : currentUrl);
+
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-secondary/40">
+        {shown ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={shown} alt="" className="max-h-12 max-w-12 object-contain" />
+        ) : (
+          <ImageUp className="size-4 text-muted-foreground/60" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <input
+          ref={input}
+          type="file"
+          name={name}
+          accept={accept}
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) {
+              setPreview(URL.createObjectURL(file));
+              setRemoved(false);
+            }
+          }}
+        />
+        <input type="hidden" name={`remove_${name}`} value={removed ? "true" : "false"} />
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => input.current?.click()}>
+            Choose file
+          </Button>
+          {shown ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setPreview(null);
+                if (input.current) input.current.value = "";
+                setRemoved(true);
+              }}
+            >
+              <Trash2 className="size-3" />
+              Remove
+            </Button>
+          ) : null}
+        </div>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{hint}</p>
+      </div>
+    </div>
+  );
+}
+
+export function BrandingSection({
+  initial,
+}: {
+  initial: {
+    appName: string;
+    appUrl: string;
+    primaryColor: string;
+    logoUrl: string | null;
+    faviconUrl: string | null;
+    cloudinary: { cloudName: string; folder: string; hasCredentials: boolean };
+  };
+}) {
+  const [pending, start] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // The same schema the wizard uses, so the two screens cannot disagree about
+  // what a valid workspace name or app URL is.
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useForm<BrandingFormInput>({
+    resolver: zodResolver(brandingFormSchema),
+    mode: "onBlur",
+    defaultValues: {
+      appName: initial.appName,
+      appUrl: initial.appUrl,
+      primaryColor: initial.primaryColor,
+      cloudinaryCloudName: initial.cloudinary.cloudName,
+      cloudinaryApiKey: "",
+      cloudinaryApiSecret: "",
+      cloudinaryFolder: initial.cloudinary.folder,
+    },
+  });
+
+  const color = watch("primaryColor");
+
+  const onSubmit = handleSubmit(() => {
+    const element = formRef.current;
+    if (!element) return;
+    start(async () => {
+      const result = await updateBranding(new FormData(element));
+      if (result.ok) toast.success("Branding saved");
+      else toast.error(result.error);
+    });
+  });
+
+  return (
+    <form ref={formRef} onSubmit={onSubmit} noValidate className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Workspace name"
+          error={errors.appName}
+          hint="Capitalised as you type. Acronyms like IBM are left alone."
+        >
+          <NameInput {...register("appName")} {...invalid(errors.appName)} maxLength={60} />
+        </Field>
+
+        <Field label="Brand colour" error={errors.primaryColor}>
+          <div className="flex gap-2">
+            <input
+              type="color"
+              value={isHexColor(color) ? color : DEFAULT_BRAND_COLOR}
+              onChange={(event) =>
+                setValue("primaryColor", event.target.value, { shouldValidate: true })
+              }
+              aria-label="Pick a brand colour"
+              className="h-8 w-10 shrink-0 cursor-pointer rounded-md border bg-card p-0.5"
+            />
+            <Input {...register("primaryColor")} {...invalid(errors.primaryColor)} spellCheck={false} />
+          </div>
+        </Field>
+      </div>
+
+      <Field
+        label="App URL"
+        error={errors.appUrl}
+        hint="Used for auth callbacks, unsubscribe links, and the logo URL inside your emails. Changing it invalidates existing passkeys."
+      >
+        <Input {...register("appUrl")} {...invalid(errors.appUrl)} spellCheck={false} inputMode="url" />
+      </Field>
+
+      <CloudinaryFields initial={initial.cloudinary} register={register} errors={errors} compact />
+
+      <Field label="Logo" help={<Help topic="logo" />}>
+        <AssetPicker
+          name="logo"
+          currentUrl={initial.logoUrl}
+          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          hint="Appears at the top of every campaign. PNG, JPEG, WebP or SVG up to 512KB."
+        />
+      </Field>
+
+      <Field label="Favicon" help={<Help topic="favicon" />}>
+        <AssetPicker
+          name="favicon"
+          currentUrl={initial.faviconUrl}
+          accept="image/png,image/x-icon,image/svg+xml"
+          hint="The browser tab icon. PNG, ICO or SVG up to 512KB."
+        />
+      </Field>
+
+      <Button type="submit" disabled={pending}>
+        {pending ? "Saving…" : "Save branding"}
+      </Button>
+    </form>
+  );
+}
