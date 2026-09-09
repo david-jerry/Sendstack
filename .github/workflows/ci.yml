@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # So a red run can be retried, and so the suite can be exercised against a
+  # dependency bump without inventing a commit. GitHub registered this
+  # workflow on the initial push without running it, which is also what this
+  # makes recoverable.
+  workflow_dispatch:
 
 jobs:
   check:
