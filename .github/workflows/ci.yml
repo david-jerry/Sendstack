@@ -44,9 +44,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `version:` here on purpose. `pnpm/action-setup` refuses outright
+      # when the version is given both in the workflow and as
+      # `packageManager` in package.json — "Multiple versions of pnpm
+      # specified" — and package.json is the copy that also governs local
+      # installs. One definition, and it is the one Corepack already reads.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: actions/setup-node@v4
         with:
@@ -93,9 +96,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      # No `version:` here on purpose. `pnpm/action-setup` refuses outright
+      # when the version is given both in the workflow and as
+      # `packageManager` in package.json — "Multiple versions of pnpm
+      # specified" — and package.json is the copy that also governs local
+      # installs. One definition, and it is the one Corepack already reads.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
