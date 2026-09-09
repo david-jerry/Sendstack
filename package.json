@@ -1,0 +1,43 @@
+{
+  "name": "sendstack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source bulk email platform \u2014 send campaigns, receive replies in real time.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.18.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n tunnel,web,inngest -c magenta,cyan,yellow \"pnpm dev:tunnel\" \"pnpm --filter @sendstack/web dev\" \"pnpm inngest:dev\"",
+    "dev:web": "pnpm --filter @sendstack/web dev",
+    "inngest:dev": "npx inngest-cli@latest dev",
+    "build": "pnpm --filter @sendstack/web build",
+    "start": "pnpm --filter @sendstack/web start",
+    "lint": "pnpm -r --if-present lint",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "db:generate": "pnpm --filter @sendstack/db db:generate",
+    "db:migrate": "pnpm --filter @sendstack/db db:migrate",
+    "db:push": "pnpm --filter @sendstack/db db:push",
+    "db:studio": "pnpm --filter @sendstack/db db:studio",
+    "auth:generate": "pnpm --filter @sendstack/auth auth:generate",
+    "setup": "pnpm install && pnpm db:migrate",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "tunnel": "node scripts/tunnel.mjs",
+    "tunnel:quick": "node scripts/tunnel.mjs --quick",
+    "changelog:add": "node scripts/changelog-add.mjs",
+    "dev:local": "concurrently -k -n web,inngest -c cyan,yellow \"pnpm --filter @sendstack/web dev\" \"pnpm inngest:dev\"",
+    "dev:tunnel": "node scripts/tunnel.mjs --apply --quiet",
+    "push:keys": "node scripts/push-keys.mjs"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.1",
+    "concurrently": "^10.0.5",
+    "dotenv": "^17.2.3",
+    "jsdom": "^28.0.1",
+    "tsx": "^4.23.13",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@sendstack/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sendstack/db": "workspace:*",
+    "@sendstack/pwa": "workspace:*",
+    "@sendstack/shared": "workspace:*",
+    "cloudinary": "^2.11.0",
+    "server-only": "^0.0.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "~5.9.3"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@sendstack/email",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.1.0",
+    "@sendstack/config": "workspace:*",
+    "@sendstack/db": "workspace:*",
+    "@sendstack/shared": "workspace:*",
+    "react": "^19.2.8",
+    "resend": "^6.26.0",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.7",
+    "@types/web-push": "^3.6.4",
+    "typescript": "~5.9.3"
+  }
+}

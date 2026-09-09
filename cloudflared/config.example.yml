@@ -1,0 +1,39 @@
+# A named Cloudflare tunnel for local development.
+#
+# Only needed if you do NOT already have ~/.cloudflared/config.yml — `pnpm
+# tunnel` finds that one on its own. Copy this here to override it.
+#
+#   cp cloudflared/config.example.yml cloudflared/config.yml
+#   cloudflared tunnel login
+#   cloudflared tunnel create sendstack-dev
+#   cloudflared tunnel route dns sendstack-dev mail.example.com
+#   pnpm tunnel
+#
+# Named rather than quick (`--url`) for one reason that matters more than the
+# setup cost: the hostname is stable. A `*.trycloudflare.com` URL changes every
+# run, and the app URL is not a cosmetic setting — it is the passkey relying
+# party id, the OAuth callback origin and the unsubscribe link domain. Rotating
+# it invalidates every registered passkey and every unsubscribe link already
+# sitting in someone's inbox.
+#
+# Prefer a subdomain of your *sending* domain. Mail from example.com whose
+# links point at a tunnel on some other host is judged on that other host's
+# reputation — which is none. Settings -> Deliverability says the same thing.
+
+tunnel: sendstack-dev
+credentials-file: ~/.cloudflared/<TUNNEL-UUID>.json
+
+ingress:
+  - hostname: mail.example.com
+    service: http://localhost:3000
+    originRequest:
+      # The dev server answers on plain HTTP; Cloudflare terminates TLS at the
+      # edge and the browser only ever sees HTTPS. That is what makes secure
+      # cookies, service workers and the Push API work against a local server.
+      noTLSVerify: true
+      # Long enough for the realtime SSE stream at /api/realtime/stream, which
+      # is a deliberately open connection rather than a slow request.
+      connectTimeout: 30s
+
+  # cloudflared requires a catch-all rule last.
+  - service: http_status:404
