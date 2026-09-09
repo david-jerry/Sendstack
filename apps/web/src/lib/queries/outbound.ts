@@ -103,7 +103,10 @@ export async function listOutboundPage(
     LIMIT ${limit + 1}
   `);
 
-  const mapped = Array.from(rows).map((row) => ({
+  return toPage(
+    Array.from(rows),
+    limit,
+    (row) => ({
     id: row.id,
     threadKey: row.thread_key,
     inReplyToId: row.in_reply_to_id,
@@ -121,9 +124,10 @@ export async function listOutboundPage(
     // The list shows a paperclip, not the files. Fetching every message's
     // attachments to render a row nobody has opened is the N+1 this avoids.
     attachments: [],
-  }));
-
-  return toPage(mapped, limit, (row) => ({ at: row.at, id: row.id }));
+    }),
+    // The raw string, not the mapped `Date` — see `Cursor.at`.
+    (row) => ({ at: row.at, id: row.id }),
+  );
 }
 
 export async function getOutboundMessage(

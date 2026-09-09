@@ -147,7 +147,10 @@ export async function listContactPage(
     ORDER BY p.created_at DESC, p.id DESC
   `);
 
-  const mapped = Array.from(rows).map((row) => ({
+  return toPage(
+    Array.from(rows),
+    limit,
+    (row) => ({
     id: row.id,
     email: row.email,
     firstName: row.first_name,
@@ -161,9 +164,10 @@ export async function listContactPage(
     listCount: Number(row.list_count),
     suppressed: row.suppressed,
     createdAt: new Date(row.created_at),
-  }));
-
-  return toPage(mapped, limit, (contact) => ({ at: contact.createdAt, id: contact.id }));
+    }),
+    // The raw string, not the mapped `Date` — see `Cursor.at`.
+    (row) => ({ at: row.created_at, id: row.id }),
+  );
 }
 
 export type ContactGroupRow = {
@@ -457,7 +461,10 @@ export async function listCampaignPage(
     LIMIT ${limit + 1}
   `);
 
-  const mapped = Array.from(rows).map((row) => ({
+  return toPage(
+    Array.from(rows),
+    limit,
+    (row) => ({
     id: row.id,
     name: row.name,
     subject: row.subject,
@@ -471,7 +478,8 @@ export async function listCampaignPage(
     suppressedCount: Number(row.suppressed_count),
     scheduledAt: row.scheduled_at ? new Date(row.scheduled_at) : null,
     createdAt: new Date(row.created_at),
-  }));
-
-  return toPage(mapped, limit, (campaign) => ({ at: campaign.createdAt, id: campaign.id }));
+    }),
+    // The raw string, not the mapped `Date` — see `Cursor.at`.
+    (row) => ({ at: row.created_at, id: row.id }),
+  );
 }

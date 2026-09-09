@@ -183,7 +183,10 @@ export async function listThreadPage(
     ORDER BY page.received_at ${direction}, page.id ${direction}
   `);
 
-  const mapped = Array.from(rows).map((row) => ({
+  return toPage(
+    Array.from(rows),
+    limit,
+    (row) => ({
     id: row.id,
     threadKey: row.thread_key,
     fromEmail: row.from_email,
@@ -198,9 +201,10 @@ export async function listThreadPage(
     starred: row.starred,
     muted: row.muted,
     snoozedUntil: row.snoozed_until ? new Date(row.snoozed_until) : null,
-  }));
-
-  return toPage(mapped, limit, (thread) => ({ at: thread.receivedAt, id: thread.id }));
+    }),
+    // The raw string, not `receivedAt` — see `Cursor.at`.
+    (row) => ({ at: row.received_at, id: row.id }),
+  );
 }
 
 export type ThreadMessage = {

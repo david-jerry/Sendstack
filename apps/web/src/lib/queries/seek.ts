@@ -55,7 +55,7 @@ export function seek(
   if (!cursor) return sql``;
 
   const operator = direction === "before" ? sql`<` : sql`>`;
-  return sql`(${sql.raw(columns.at)}, ${sql.raw(columns.id)}) ${operator} (${cursor.at.toISOString()}::timestamptz, ${cursor.id}::uuid)`;
+  return sql`(${sql.raw(columns.at)}, ${sql.raw(columns.id)}) ${operator} (${cursor.at}::timestamptz, ${cursor.id}::uuid)`;
 }
 
 /**

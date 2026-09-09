@@ -18,8 +18,29 @@
  */
 
 export type Cursor = {
-  /** The sort timestamp of the last row on the page just read. */
-  at: Date;
+  /**
+   * The sort timestamp of the last row on the page just read, **exactly as
+   * Postgres returned it** — a string, not a `Date`.
+   *
+   * This was a `Date`, and that quietly broke every paginated list. Postgres
+   * stores `timestamptz` to microseconds; a JavaScript `Date` holds
+   * milliseconds, so `new Date(row.received_at).toISOString()` turns
+   * `07:37:07.982431` into `07:37:07.982`. The cursor then names a moment
+   * slightly *before* the row it was built from, and the tuple comparison
+   * does exactly what it was told:
+   *
+   *  - ascending (`(at, id) > cursor`) — the boundary row is after its own
+   *    cursor, so it appears again at the top of the next page;
+   *  - descending (`<`), which is every list's default — the boundary row is
+   *    correctly excluded, and so is every other row inside that truncated
+   *    millisecond. Those rows are **skipped**, seen on no page at all.
+   *
+   * No rounding fixes it. Rounding down repeats, rounding up skips; the
+   * precision has to survive the round trip, so the raw string is what
+   * travels. Callers pass it straight from the row, which is where it still
+   * has all its digits.
+   */
+  at: string;
   /** Tie-breaker, so rows sharing a timestamp still have a total order. */
   id: string;
 };
@@ -32,7 +53,7 @@ export type Cursor = {
  * Base64url so it survives a query string untouched.
  */
 export function encodeCursor(cursor: Cursor): string {
-  const payload = JSON.stringify({ a: cursor.at.toISOString(), i: cursor.id });
+  const payload = JSON.stringify({ a: cursor.at, i: cursor.id });
   return Buffer.from(payload, "utf8").toString("base64url");
 }
 
@@ -50,11 +71,12 @@ export function decodeCursor(value: string | null | undefined): Cursor | null {
     const parsed = JSON.parse(raw) as { a?: unknown; i?: unknown };
     if (typeof parsed.a !== "string" || typeof parsed.i !== "string") return null;
 
-    const at = new Date(parsed.a);
-    if (Number.isNaN(at.getTime())) return null;
+    // Parsed only to reject a hand-edited value; the *string* is what is
+    // kept, because parsing is what loses the microseconds.
+    if (Number.isNaN(new Date(parsed.a).getTime())) return null;
     if (parsed.i.length === 0) return null;
 
-    return { at, id: parsed.i };
+    return { at: parsed.a, id: parsed.i };
   } catch {
     return null;
   }
@@ -106,17 +128,28 @@ export type Page<T> = {
  * is answered without a second `count(*)` over the same filter — and a count
  * would be a lie by the time it rendered anyway.
  */
-export function toPage<T>(
-  rows: T[],
+export function toPage<Raw, Item>(
+  rows: Raw[],
   limit: number,
-  key: (row: T) => Cursor,
-): Page<T> {
-  if (rows.length <= limit) return { items: rows, nextCursor: null };
+  /** Row to API shape. Runs only for the rows that make the page. */
+  map: (row: Raw) => Item,
+  /**
+   * The cursor, read from the **raw** row rather than the mapped item.
+   *
+   * That is the whole reason this takes two functions. The mapped item holds
+   * a `Date`, which cannot express the microseconds Postgres stored, so a
+   * cursor built from it names a moment before the row it came from — and
+   * lists then repeat or skip rows at the boundary. The raw row still has the
+   * full-precision string.
+   */
+  key: (row: Raw) => Cursor,
+): Page<Item> {
+  if (rows.length <= limit) return { items: rows.map(map), nextCursor: null };
 
-  const items = rows.slice(0, limit);
-  const last = items[items.length - 1];
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
   return {
-    items,
+    items: page.map(map),
     nextCursor: last ? encodeCursor(key(last)) : null,
   };
 }

@@ -52,7 +52,7 @@ databaseSuite("list queries against a real database", { timeout: 30_000 }, () =>
     const first = await listThreadPage({ limit: 1 });
     const cursor = first.nextCursor
       ? (await import("@/lib/cursor")).decodeCursor(first.nextCursor)
-      : { at: new Date(), id: "00000000-0000-0000-0000-000000000000" };
+      : { at: new Date().toISOString(), id: "00000000-0000-0000-0000-000000000000" };
 
     const second = await listThreadPage({ limit: 1, cursor });
     expect(Array.isArray(second.items)).toBe(true);
@@ -99,7 +99,7 @@ databaseSuite("list queries against a real database", { timeout: 30_000 }, () =>
     const { decodeCursor } = await import("@/lib/cursor");
     const cursor = first.nextCursor
       ? decodeCursor(first.nextCursor)
-      : { at: new Date(), id: "00000000-0000-0000-0000-000000000000" };
+      : { at: new Date().toISOString(), id: "00000000-0000-0000-0000-000000000000" };
 
     expect(Array.isArray((await listOutboundPage("sent", { limit: 1, cursor })).items)).toBe(true);
   });
@@ -114,7 +114,7 @@ databaseSuite("list queries against a real database", { timeout: 30_000 }, () =>
 
     const cursor = first.nextCursor
       ? decodeCursor(first.nextCursor)
-      : { at: new Date(), id: "00000000-0000-0000-0000-000000000000" };
+      : { at: new Date().toISOString(), id: "00000000-0000-0000-0000-000000000000" };
     expect(Array.isArray((await listContactPage({ limit: 1, cursor })).items)).toBe(true);
   });
 
@@ -128,7 +128,7 @@ databaseSuite("list queries against a real database", { timeout: 30_000 }, () =>
 
     const cursor = first.nextCursor
       ? decodeCursor(first.nextCursor)
-      : { at: new Date(), id: "00000000-0000-0000-0000-000000000000" };
+      : { at: new Date().toISOString(), id: "00000000-0000-0000-0000-000000000000" };
     expect(Array.isArray((await listCampaignPage({ limit: 1, cursor })).items)).toBe(true);
   });
 
@@ -277,16 +277,35 @@ databaseSuite("list queries against a real database", { timeout: 30_000 }, () =>
         ids.push(row!.id);
       }
 
+      /**
+       * Scoped to this test's own rows, and that is not tidiness.
+       *
+       * Paging is two queries with a boundary between them, and this used to
+       * ask for the *whole* inbox. Vitest runs test files in parallel, so a
+       * sibling suite inserting or deleting `inbound_emails` between page one
+       * and page two moved the boundary underneath it — a row then legitimately
+       * appeared on both pages and the assertion failed. It passed locally,
+       * where the ambient rows happened to sit outside the first two pages, and
+       * failed in CI against an otherwise-empty database. The search term is
+       * the run's own stamp, which appears in `from_email` and nothing else.
+       */
       for (const sort of ["newest", "oldest"] as const) {
-        const first = await listThreadPage({ sort, limit: 2 });
-        expect(first.items.length, sort).toBeGreaterThanOrEqual(2);
+        const page = (cursor?: string | null) =>
+          listThreadPage({
+            sort,
+            limit: 2,
+            query: stamp,
+            ...(cursor ? { cursor: decodeCursor(cursor) } : {}),
+          });
+
+        const first = await page();
+        expect(first.items.length, sort).toBe(2);
         expect(first.nextCursor, `${sort} must offer a second page`).toBeTruthy();
 
-        const second = await listThreadPage({
-          sort,
-          limit: 2,
-          cursor: decodeCursor(first.nextCursor),
-        });
+        const second = await page(first.nextCursor);
+        // Exactly the third seeded row, so "no repeats" is a real claim rather
+        // than a statement about an empty second page.
+        expect(second.items.length, `${sort} second page`).toBe(1);
 
         // The boundary is the whole point: no row may appear on both pages.
         const firstIds = new Set(first.items.map((item) => item.id));
