@@ -284,6 +284,90 @@ MX records and production hosting:
 
 ---
 
+## Deploy to Vercel
+
+Vercel is the primary deployment target, and the whole configuration is two
+settings and two environment variables.
+
+### 1. Import the repository
+
+At [vercel.com/new](https://vercel.com/new), import your fork and then set:
+
+| Setting | Value |
+| --- | --- |
+| **Root Directory** | `apps/web` |
+| Framework | Next.js — detected |
+| Build command | `pnpm build` — declared in `apps/web/vercel.json` |
+| Install command | leave empty |
+
+**Root Directory is the one setting that must be changed by hand.** The
+monorepo root contains no framework, so a root deploy detects nothing and
+fails complaining about a missing output directory rather than about the
+setting that is actually wrong. Everything else is either detected or declared
+in [apps/web/vercel.json](apps/web/vercel.json); the install command is
+deliberately left to Vercel, which installs the whole pnpm workspace from the
+repository root, where the lockfile is.
+
+### 2. Create the schema, once, from your machine
+
+Nothing in the build does this, on purpose: Vercel builds preview and
+production deployments identically, so a migration step in the build would let
+a preview branch migrate your production database.
+
+```bash
+DATABASE_URL="<your production connection string>" pnpm db:migrate
+```
+
+Forgetting is not fatal, or even confusing — the app probes for its tables with
+`to_regclass`, which tells "not migrated" apart from "cannot connect", and the
+wizard stops on a `needs-migration` step instead of showing a broken form.
+
+### 3. Set two environment variables
+
+`DATABASE_URL` and `AUTH_SECRET`, and nothing else is required. Deploy, open
+the URL, and finish the wizard in the browser — Resend, Redis, Inngest and
+branding are all saved to your database, so changing any of them later needs no
+redeploy.
+
+Four keys from a development `.env` are actively wrong in production, and each
+one fails quietly:
+
+| Key | Why not |
+| --- | --- |
+| `INNGEST_DEV` | Campaigns queue and never send. Nothing errors. |
+| `NEXT_PUBLIC_APP_URL` | A `localhost` value puts `localhost` in every unsubscribe link and email logo. |
+| `REDIS_URL` | A `redis://` socket cannot be held by a serverless function. Use `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`, or omit Redis. |
+| `NEXT_PUBLIC_ENABLE_SW` | Development-only. The service worker registers in production regardless. |
+
+Set `DATABASE_POOL_MAX=2` as well if the URL points at a pooler (Neon's
+`-pooler` host, Supabase port 6543, any PgBouncer). Every warm function is its
+own process with its own pool, so the default of 10 becomes 10 × however many
+instances are running.
+
+### 4. Point the two webhooks at the deployment
+
+- Inngest app → `https://your-domain.com/api/inngest`
+- Resend webhook → `https://your-domain.com/api/webhooks/resend`
+
+Then set the App URL in Settings to the production domain, no trailing slash.
+
+### Function limits
+
+Fluid Compute is on by default and allows 300 seconds on Hobby. The three
+streaming and job routes declare `maxDuration = 300`, which sits exactly at
+that ceiling — if you *disable* Fluid Compute, Hobby drops to 60 seconds and
+those declarations fail the build.
+
+Neither limit threatens correctness. Both `EventSource` clients reconnect on
+their own, so the cap only changes how often that happens, and a long campaign
+is not one long call: Inngest invokes the endpoint once per step, so a
+200,000-recipient send is thousands of short invocations.
+
+The full walkthrough, including any other Node host, a VPS and Docker:
+[docs/SELF-HOSTING.md](docs/SELF-HOSTING.md).
+
+---
+
 ## How the real-time part works
 
 **Resend has no WebSocket or streaming API.** Inbound mail and delivery events

@@ -240,13 +240,39 @@ If nothing appears:
 
 This is the primary target, so it is worth being specific.
 
-```bash
-vercel
-```
+**Import the repository, do not deploy the root.** At [vercel.com/new], pick the
+repository and then set **Root Directory** to `apps/web`. This is the one
+setting the import flow cannot infer: the monorepo root has no framework in it,
+so a root-directory deploy detects nothing, builds nothing Next understands, and
+fails with a message about a missing output directory rather than about the
+setting that is actually wrong. Everything else is detected — `apps/web/vercel.json`
+declares the framework and build command, and Vercel installs the whole pnpm
+workspace from the repository root because the lockfile lives there.
+
+The install command is deliberately *not* pinned in `vercel.json`. Vercel already
+installs pnpm workspaces from the repository root with `--frozen-lockfile`; an
+explicit `installCommand` runs relative to the Root Directory instead, so pinning
+it changes which lockfile is validated — for no gain over the default.
+
+Or from a machine with the CLI, run `vercel` inside `apps/web`.
 
 Set **only** `DATABASE_URL` and `AUTH_SECRET` in the project settings. Deploy,
 open the URL, and finish the wizard in the browser — everything else is saved
 to your database, so changing a key later needs no redeploy.
+
+**Do not paste your development `.env` in wholesale.** Four of its keys are
+actively wrong in production, and each fails quietly:
+
+| Key | Why not |
+|---|---|
+| `INNGEST_DEV` | Campaigns queue and never send. Nothing errors. |
+| `NEXT_PUBLIC_APP_URL` | A `localhost` value puts `localhost` in unsubscribe links and email logos. Set the production URL, no trailing slash — or leave it out and set App URL in Settings. |
+| `REDIS_URL` | A `redis://` server cannot be reached from a serverless function that holds no socket. Use `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`, or omit Redis entirely. |
+| `NEXT_PUBLIC_ENABLE_SW` | Development-only. The worker registers in production regardless. |
+
+`ALLOWED_DEV_ORIGINS` is ignored in production and harmless either way, and
+`DATABASE_URL` should point at a production database rather than your
+development one — see below.
 
 **Create the schema first.** Nothing does this for you: the build runs
 `next build` and no more, and there is deliberately no migration step in it —

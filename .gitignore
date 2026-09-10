@@ -7,6 +7,9 @@ build/
 .env
 .env.local
 .env.*.local
+# Real production secrets, not a template: same values as `.env`, pointed at
+# the live database. `.env` above does not match it — the pattern is literal.
+.env.prod
 !.env.example
 
 # A named tunnel's config carries the tunnel UUID and the path to its
