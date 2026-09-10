@@ -13,7 +13,8 @@ vi.mock("@sendstack/theme", () => ({
     <button type="button" aria-label="Toggle theme" {...props} />
   ),
 }));
-vi.mock("@/stores/realtime-store", () => ({ useUnreadCount: () => 0 }));
+/** `useActivity` feeds the Activity bell in the rail and the mobile header. */
+vi.mock("@/stores/realtime-store", () => ({ useUnreadCount: () => 0, useActivity: () => [] }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@sendstack/auth/client", () => ({
   signOut: vi.fn(async () => ({ error: null })),
@@ -55,6 +56,7 @@ function renderShell() {
       user={USER}
       counts={COUNTS}
       branding={{ name: "Sendstack", logoHref: null }}
+      activity={[]}
       defaultSidebarOpen
     >
       <div>content</div>

@@ -449,6 +449,31 @@ describe("push notifications", () => {
     );
   });
 
+  it("alerts again on a replacement by default, but not when told otherwise", async () => {
+    /**
+     * `renotify` is what decides whether replacing a notification buzzes the
+     * device again. True is right for a second event under one tag — that
+     * is a second thing to know about. False is for the sender that pushes
+     * twice on purpose to improve one notification: Sendstack's inbound mail
+     * goes out once from the webhook's metadata and again with a body
+     * preview, and two buzzes for one message is what makes people turn
+     * notifications off.
+     */
+    await fire("push", { data: { json: () => ({ title: "First", tag: "inbound:1" }) } });
+    expect(showNotification).toHaveBeenLastCalledWith(
+      "First",
+      expect.objectContaining({ renotify: true }),
+    );
+
+    await fire("push", {
+      data: { json: () => ({ title: "First", body: "…now with a preview", tag: "inbound:1", renotify: false }) },
+    });
+    expect(showNotification).toHaveBeenLastCalledWith(
+      "First",
+      expect.objectContaining({ renotify: false }),
+    );
+  });
+
   it("still shows something for a payload it cannot read", async () => {
     /**
      * Browsers require a *visible* notification for every push a subscription

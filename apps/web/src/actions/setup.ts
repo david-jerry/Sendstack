@@ -5,7 +5,6 @@ import { existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { revalidatePath } from "next/cache";
-import { Resend } from "resend";
 import postgres from "postgres";
 import { AUTH_SECRET_MIN_LENGTH, brandingFormSchema, emailConfigSchema } from "@sendstack/shared";
 import {
@@ -22,7 +21,7 @@ import {
   type BrandingKind,
 } from "@sendstack/config";
 import { requireSession, resetAuth } from "@sendstack/auth";
-import { resetResendClient } from "@sendstack/email";
+import { resetResendClient, verifyResendKey } from "@sendstack/email";
 import { backendFor, parseRedisTarget, RedisConfigError, resetRedisClient } from "@sendstack/redis";
 
 type Result<T = unknown> = ({ ok: true } & T) | { ok: false; error: string };
@@ -270,24 +269,7 @@ export async function saveBranding(formData: FormData): Promise<Result> {
 
 export async function testResendKey(apiKey: string): Promise<Result<{ domains: string[] }>> {
   await guard();
-  return probeResendKey(apiKey);
-}
-
-/** The test without the guard, for `saveEmailConfig` which has already passed it. */
-async function probeResendKey(apiKey: string): Promise<Result<{ domains: string[] }>> {
-  const key = apiKey.trim();
-  if (!key.startsWith("re_")) return { ok: false, error: "Resend API keys start with `re_`." };
-
-  try {
-    const client = new Resend(key);
-    const response = await client.domains.list();
-    if (response.error) return { ok: false, error: response.error.message };
-
-    const data = response.data as unknown as { data?: { name: string }[] } | null;
-    return { ok: true, domains: (data?.data ?? []).map((domain) => domain.name) };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Could not reach Resend." };
-  }
+  return verifyResendKey(apiKey);
 }
 
 export async function saveEmailConfig(input: {
@@ -321,7 +303,7 @@ export async function saveEmailConfig(input: {
   const { apiKey, domain, fromEmail, fromName, webhookSecret } = parsed.data;
 
   if (apiKey?.trim()) {
-    const test = await probeResendKey(apiKey);
+    const test = await verifyResendKey(apiKey);
     if (!test.ok) return test;
     await setSecret("resendApiKey", apiKey);
   }

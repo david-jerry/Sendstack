@@ -120,7 +120,7 @@ vi.mock("@sendstack/email", async (importOriginal) => {
 
 const { POST } = await import("./route");
 
-function deliver(id: string, type = "email.sent") {
+function deliver(id: string, type = "email.sent", data?: Record<string, unknown>) {
   return POST(
     new Request("http://localhost/api/webhooks/resend", {
       method: "POST",
@@ -128,7 +128,7 @@ function deliver(id: string, type = "email.sent") {
       body: JSON.stringify({
         type,
         created_at: new Date().toISOString(),
-        data: { email_id: "msg_test", to: ["a@example.com"] },
+        data: data ?? { email_id: "msg_test", to: ["a@example.com"] },
       }),
     }),
   );
@@ -208,5 +208,46 @@ describe("webhook handler failure", () => {
     expect(mocks.executeCalls).toBeGreaterThanOrEqual(3);
     expect(mocks.publishRealtime).not.toHaveBeenCalled();
     expect(mocks.committed).toEqual([]);
+  });
+
+  /**
+   * The same guarantee for an account event, which reaches the database by a
+   * different path.
+   *
+   * `suppression.added` is the only one of the ten that writes, and it writes
+   * through `suppress()` — so it carries a realtime publish *and* a web push.
+   * A push is the one effect that cannot be recalled once it has gone out,
+   * which is what makes "nothing escapes a rolled-back transaction"
+   * load-bearing here rather than tidy. `domain.updated` would not serve:
+   * it writes nothing, so there is no statement for the failure to land on.
+   *
+   * **The failure is aimed at the second statement, and that is the whole
+   * test.** `suppress()` runs `INSERT INTO suppressions` and then `UPDATE
+   * contacts`; failing the first would throw before any publish site was
+   * reached and the assertions below would hold no matter where publishing
+   * happened — the vacuum the sibling test above documents. Failing the
+   * second means the INSERT has already succeeded, so a publish placed
+   * anywhere after it would have escaped a transaction that then rolled back.
+   */
+  it("neither publishes nor pushes when an account event rolls back", async () => {
+    const { broadcastPush } = await import("@sendstack/email");
+    mocks.executeError = new Error("deadlock detected");
+    mocks.failOnExecuteCall = 2;
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await deliver("evt_6", "suppression.added", {
+      email: "them@example.test",
+      origin: "bounce",
+    });
+    quiet.mockRestore();
+
+    expect(response.status).toBe(500);
+    expect(mocks.rolledBack).toBe(1);
+    expect(mocks.committed).toEqual([]);
+    expect(mocks.releaseClaim).toHaveBeenCalledWith("webhook:evt_6");
+    // The suppression row was written before the failure, so this is not
+    // vacuous: there was something to wrongly announce.
+    expect(mocks.executeCalls).toBeGreaterThanOrEqual(2);
+    expect(mocks.publishRealtime).not.toHaveBeenCalled();
+    expect(vi.mocked(broadcastPush)).not.toHaveBeenCalled();
   });
 });

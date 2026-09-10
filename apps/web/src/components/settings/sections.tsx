@@ -12,7 +12,7 @@ import {
 } from "@/actions/settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, SecretInput } from "@/components/ui/input";
 import { NameInput } from "@/components/ui/name-input";
 import { Switch } from "@/components/ui/switch";
 import { Help } from "@/components/setup/help";
@@ -163,13 +163,10 @@ export function EmailSection({
         note="Leave blank to keep the stored key. Pasting a new one replaces it."
       >
         <div className="flex items-center gap-2">
-          <Input
+          <SecretInput
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="re_…"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
           />
           <SecretState present={initial.hasKey} />
         </div>
@@ -224,13 +221,10 @@ export function EmailSection({
 
       <FieldRow label="Webhook signing secret" help={<Help topic="resendWebhookSecret" />}>
         <div className="flex items-center gap-2">
-          <Input
+          <SecretInput
             value={webhookSecret}
             onChange={(e) => setWebhookSecret(e.target.value)}
             placeholder="whsec_…"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
           />
           <SecretState present={initial.hasWebhookSecret} />
         </div>
@@ -297,13 +291,7 @@ export function RealtimeSection({
       {isRest ? (
         <FieldRow label="Upstash REST token" note="Leave blank to keep the stored token.">
           <div className="flex items-center gap-2">
-            <Input
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
-            />
+            <SecretInput value={token} onChange={(e) => setToken(e.target.value)} />
             <SecretState present={initial.hasToken} />
           </div>
         </FieldRow>
@@ -343,24 +331,14 @@ export function JobsSection({
     <div className="space-y-4">
       <FieldRow label="Event key" help={<Help topic="inngest" />}>
         <div className="flex items-center gap-2">
-          <Input
-            value={eventKey}
-            onChange={(e) => setEventKey(e.target.value)}
-            type="password"
-            autoComplete="off"
-          />
+          <SecretInput value={eventKey} onChange={(e) => setEventKey(e.target.value)} />
           <SecretState present={initial.hasEventKey} />
         </div>
       </FieldRow>
 
       <FieldRow label="Signing key">
         <div className="flex items-center gap-2">
-          <Input
-            value={signingKey}
-            onChange={(e) => setSigningKey(e.target.value)}
-            type="password"
-            autoComplete="off"
-          />
+          <SecretInput value={signingKey} onChange={(e) => setSigningKey(e.target.value)} />
           <SecretState present={initial.hasSigningKey} />
         </div>
       </FieldRow>

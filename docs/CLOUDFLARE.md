@@ -12,7 +12,7 @@ quietly rather than loudly:
 
 A Cloudflare tunnel gives you that origin against a server still running on your
 laptop: TLS terminates at Cloudflare's edge and traffic is forwarded to
-`http://localhost:3000`, so the browser only ever sees HTTPS.
+`http://localhost:3005`, so the browser only ever sees HTTPS.
 
 ## If you already have a tunnel
 

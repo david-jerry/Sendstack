@@ -3,6 +3,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import {
 	ArrowRight,
+	Bell,
 	BookOpen,
 	Code2,
 	GitPullRequest,
@@ -80,6 +81,8 @@ export async function generateMetadata(): Promise<Metadata> {
 			"self-hosted email",
 			"bulk email campaigns",
 			"shared inbox",
+			"web push notifications",
+			"realtime email inbox",
 		],
 		openGraph: {
 			type: "website",
@@ -448,7 +451,19 @@ export default async function Home() {
 								Threads group by message ID, so replies land
 								under the conversation they belong to. New mail
 								appears over Server-Sent Events — no polling, no
-								refresh.
+								refresh. The conversation is highlighted where
+								it lands, so you can see which one is new
+								without reading the timestamps.
+							</p>
+							<p>
+								With the tab closed, a web push notification
+								reaches the device instead: the sender, the
+								subject and the opening line, arriving the
+								moment the webhook commits and filled in with a
+								preview once the body is fetched. With the tab
+								open, a short sound — one cue for mail
+								arriving, another for a send that failed —
+								which you can turn off per browser.
 							</p>
 						</Feature>
 
@@ -625,6 +640,16 @@ export default async function Home() {
 										</dt>
 										<dd className="mt-1 text-xs text-muted-foreground">
 											Realtime pub/sub and rate limiting.
+										</dd>
+									</Card>
+									<Card className="p-3.5 border-border/60 bg-card shadow-2xs">
+										<dt className="flex items-center gap-2 font-semibold text-foreground">
+											<Bell className="size-4 text-primary" />
+											Web Push & PWA
+										</dt>
+										<dd className="mt-1 text-xs text-muted-foreground">
+											VAPID notifications from a Workbox
+											service worker.
 										</dd>
 									</Card>
 								</dl>

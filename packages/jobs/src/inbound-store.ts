@@ -129,6 +129,84 @@ export async function announceInboundEmail(
 ): Promise<void> {
   await publishInbound(record, meta);
   await sendEvent(hydrateEvent(meta.providerEmailId, meta.createdAt));
+  const from = parseAddress(meta.from);
+  await notifyInbound(
+    record,
+    { fromEmail: from.email, fromName: from.name, subject: meta.subject ?? null, snippet: null },
+    // The first notification for this message, so it alerts.
+    { renotify: true },
+  );
+}
+
+/**
+ * The push for one arriving message, from whichever half of the arrival has
+ * run.
+ *
+ * Inbound push used to live only in `storeInboundContent`, which runs in the
+ * `fetch-inbound-email` job. That made the lock screen depend on Inngest: an
+ * install with no job queue configured — which is every install until it is
+ * set up — received mail, updated its inbox, and notified nobody, ever. The
+ * webhook now notifies as soon as the row commits, and the hydrate replaces
+ * that notification with one that has the body in it.
+ *
+ * **The tag is the message, not the thread, and that is what makes the pair
+ * one notification.** A tag collapses notifications that share it, so the
+ * second push overwrites the first rather than stacking beneath it — but
+ * only if the two agree on the tag, and the two halves cannot agree on a
+ * thread key: the webhook derives it from `message_id` alone, while hydrate
+ * re-derives it from `in-reply-to` and `references`, which is the whole
+ * point of hydrating. A message that joins an existing conversation changes
+ * thread key between the two calls, and a thread-keyed tag would then leave
+ * the metadata-only notification sitting on the lock screen next to its own
+ * replacement. The row id does not move.
+ *
+ * The cost, stated plainly: three replies to one conversation are now three
+ * notifications where they used to collapse into one. Duplicate notifications
+ * for a *single* message is the worse failure — it is the one that makes
+ * people turn notifications off — and it is the one the row id rules out.
+ */
+async function notifyInbound(
+  record: RecordResult,
+  content: {
+    fromEmail: string;
+    fromName: string | null;
+    subject: string | null;
+    snippet: string | null;
+  },
+  options: { renotify: boolean },
+): Promise<void> {
+  try {
+    await broadcastPush({
+      title: content.fromName?.trim() || content.fromEmail,
+      body: notificationPreview(content.subject, content.snippet),
+      // The thread reader for this message. `notificationclick` in the
+      // service worker focuses an open window and navigates it here, so
+      // tapping the notification lands on the mail rather than on the list.
+      url: `/inbox/${record.id}`,
+      tag: `inbound:${record.id}`,
+      /**
+       * The second push must not buzz again.
+       *
+       * A tag makes the replacement silent-*looking* but not silent:
+       * `renotify` defaults to true in the worker, which re-alerts on every
+       * replacement. That is right for a second event and wrong here, where
+       * the two pushes are one message told twice — and a device that buzzes
+       * twice per message is one whose owner turns notifications off, which
+       * costs every future message rather than this one.
+       */
+      renotify: options.renotify,
+    });
+  } catch (error) {
+    /**
+     * Never fatal to the caller. `announceInboundEmail` runs after the
+     * webhook's transaction has committed and `storeInboundContent` has
+     * already stored the mail — in both cases the message is safe, and a
+     * push service being slow or down must not turn that into a failed
+     * handler and a ten-hour retry ladder that would re-notify rather than
+     * re-store.
+     */
+    console.warn("[inbound] push notification failed", error);
+  }
 }
 
 /** The fields an announcement needs. Less than a full `InboundMetadata`. */
@@ -256,33 +334,38 @@ export async function storeInboundContent(content: NormalizedInbound): Promise<b
   });
 
   /**
-   * Push covers the case the realtime stream cannot: nobody has the app open.
+   * The second of the two pushes for this message, and the one worth
+   * reading.
    *
-   * Fired here rather than from the webhook because this is the point at which
-   * there is something worth reading — the webhook payload is metadata only,
-   * so a notification sent from there would say "new message" and open a
-   * thread with no body in it.
+   * The webhook already raised one from metadata the moment the row landed;
+   * this replaces it — same tag, now with a snippet — because this is the
+   * first point at which there is a body to preview. Neither is redundant:
+   * the first is what makes the notification *timely* and what makes it
+   * arrive at all on an install with no job queue, and this is what makes it
+   * *useful*.
    *
-   * Deliberately not awaited into the result: a push service being slow or
-   * down must not fail the job that has already stored the mail. The realtime
-   * event above is the primary channel and has been sent.
-   *
-   * The thread key is the tag, so ten replies to one conversation replace each
-   * other instead of stacking ten notifications on a lock screen.
+   * Reached by the reconciler as well as the job, so a message the webhook
+   * never delivered still notifies once, from here.
    */
-  try {
-    await broadcastPush({
-      title: content.fromName?.trim() || content.fromEmail,
-      body: notificationPreview(content.subject, content.snippet),
-      // The thread reader for this message. `notificationclick` in the service
-      // worker focuses an open window and navigates it here, so tapping the
-      // notification lands on the mail rather than on the inbox list.
-      url: `/inbox/${row.id}`,
-      tag: row.threadKey,
-    });
-  } catch (error) {
-    console.warn("[inbound] push notification failed", error);
-  }
+  await notifyInbound(
+    { id: row.id, threadKey: row.threadKey, created: true },
+    {
+      fromEmail: content.fromEmail,
+      fromName: content.fromName,
+      subject: content.subject,
+      snippet: content.snippet,
+    },
+    /**
+     * An improvement to a notification already on screen, so it updates in
+     * place without alerting. On the reconciler's path — a message the
+     * webhook never delivered — this is the *only* push for the message and
+     * so the one that will not buzz; the mail is already in the inbox by
+     * then, and a silent notification that is there when the phone is next
+     * picked up is the right outcome for mail that arrived while the
+     * webhook was down.
+     */
+    { renotify: false },
+  );
 
   return true;
 }

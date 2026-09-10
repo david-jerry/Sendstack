@@ -100,3 +100,42 @@ export async function defaultFrom(): Promise<string> {
   const address = config.resend.fromEmail ?? `noreply@${config.resend.domain ?? "example.com"}`;
   return formatFrom(config.resend.fromName, address);
 }
+
+/**
+ * Whether a key Resend would accept has actually been pasted.
+ *
+ * Here rather than in an action because two writers need the same answer —
+ * the setup wizard's email step and Settings → Email — and only the wizard
+ * had it. That asymmetry is not theoretical: `updateEmailSettings` stored
+ * whatever arrived, a password manager filled the `type="password"` key field
+ * with a database password, and the instance then answered
+ * `400 API key is invalid` to every provider read while the already-built
+ * client went on sending until its cache expired. One check, one place, both
+ * callers.
+ *
+ * `domains.list` is the probe because it is the cheapest authenticated `GET`
+ * Resend has and it is read-only — a probe that sent anything would be a
+ * probe nobody dares run on a live key. The domains come back with the
+ * result because the wizard shows them, which also saves it a second call.
+ *
+ * Deliberately builds its own client instead of going through
+ * `resendClient()`: the key being tested is the *candidate*, not the stored
+ * one, and routing it through the module cache would either test the wrong
+ * key or poison the cache with an unverified one.
+ */
+export async function verifyResendKey(
+  apiKey: string,
+): Promise<{ ok: true; domains: string[] } | { ok: false; error: string }> {
+  const key = apiKey.trim();
+  if (!key.startsWith("re_")) return { ok: false, error: "Resend API keys start with `re_`." };
+
+  try {
+    const response = await new Resend(key).domains.list();
+    if (response.error) return { ok: false, error: response.error.message };
+
+    const data = response.data as unknown as { data?: { name: string }[] } | null;
+    return { ok: true, domains: (data?.data ?? []).map((domain) => domain.name) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not reach Resend." };
+  }
+}

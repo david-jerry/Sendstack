@@ -8,6 +8,7 @@ import { getBrandingRefsCached, getConfigCached } from "@/lib/config-cache"
 import { SIDEBAR_COOKIE_NAME } from "@/lib/sidebar-state"
 import { requireAccess } from "@/lib/setup-gate"
 import { RealtimeBridge } from "@/hooks/use-realtime"
+import { recentAccountActivity } from "@/lib/queries/activity"
 import { folderCounts } from "@/lib/queries/thread"
 import { NO_INDEX_METADATA } from "@/lib/seo"
 
@@ -37,13 +38,17 @@ export default async function AppLayout({
 	 */
 	const session = await requireAccess()
 
-	const [counts, config, refs, cookieStore] = await Promise.all([
+	const [counts, config, refs, activity, cookieStore] = await Promise.all([
 		folderCounts(),
 		// The cached wrappers, not the raw calls: the root layout's
 		// `generateMetadata` has already asked for both in this same request,
 		// and `cache()` is what stops that being two more round trips.
 		getConfigCached(),
 		getBrandingRefsCached(),
+		// One more query in the same batch, not a fifth step: the Activity bell
+		// is chrome, and a feed that delayed the inbox behind it would be the
+		// wrong trade. It is bounded by LIMIT and indexed on `type`.
+		recentAccountActivity(),
 		cookies(),
 	])
 
@@ -68,6 +73,7 @@ export default async function AppLayout({
 					emailVerified: session.user.emailVerified ?? false,
 				}}
 				counts={counts}
+				activity={activity}
 				branding={{
 					name: config.appName,
 					logoHref: refs.logo?.href ?? null,

@@ -1,3 +1,4 @@
+export * from "./account-events";
 export * from "./constants";
 export * from "./enums";
 export * from "./email-address";
@@ -26,6 +27,7 @@ export {
   bareEvent,
   eventAdvances,
   isDeliveryEventName,
+  isTerminalDeliveryEvent,
   nextOutboundStatus,
   nextRecipientStatus,
   outboundStatusForEvent,

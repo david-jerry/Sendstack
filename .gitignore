@@ -33,3 +33,18 @@ apps/web/public/sw.js
 *.tsbuildinfo
 coverage/
 .vercel
+
+# Code assistants. `.github/*` rather than `.github`: git does not descend
+# into an excluded directory, so a negation under one never matches and the
+# workflows would be ignored the moment a new one is added.
+.claude/
+.github/*
+!.github/workflows/
+
+# The sound files the app serves live in `apps/web/public/sounds/`, which is
+# committed. This is the drop folder the originals arrived in; committing it
+# too would put the same bytes in the repository twice.
+notification_sounds/
+
+# WSL writes one of these beside every file copied in from Windows.
+*:Zone.Identifier

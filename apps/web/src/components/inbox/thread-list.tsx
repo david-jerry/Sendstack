@@ -57,9 +57,22 @@ export function ThreadList({
 									: `${basePath}/${thread.id}`
 							}
 							className={cn(
-								"group flex gap-2.5 border-b px-3 py-2.5 transition-colors",
+								"group relative flex gap-2.5 border-b px-3 py-2.5 transition-colors",
 								active ? "bg-accent" : "hover:bg-accent/50",
-								isFresh && !active && "bg-signal-unread/4",
+								/*
+								 * A tint you can actually see, plus an accent bar.
+								 *
+								 * This was `bg-signal-unread/4` — four percent of a colour
+								 * over the list background, which is below the threshold at
+								 * which a row reads as different from its neighbours on any
+								 * screen not in a dark room. The highlight existed and
+								 * nobody could tell. 10% carries in both themes, and the bar
+								 * is the part that survives being glanced at: an edge is
+								 * noticed peripherally where a wash of colour is not.
+								 */
+								isFresh &&
+									!active &&
+									"bg-signal-unread/10 before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-signal-unread",
 							)}
 						>
 							<Avatar

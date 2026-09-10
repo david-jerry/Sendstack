@@ -9,7 +9,7 @@ pnpm install
 pnpm dev
 ```
 
-Then open <http://localhost:3000>.
+Then open <http://localhost:3005>.
 
 This document is the reference for what the wizard is asking for, plus the
 parts it cannot do for you — DNS records, production hosting, and the two
