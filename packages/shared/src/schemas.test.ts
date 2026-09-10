@@ -7,6 +7,7 @@ import {
     composeSingleSchema,
     contactInputSchema,
     customTemplateInputSchema,
+    emailConfigSchema,
     splitAddressList,
     templateRefSchema,
 } from "./schemas";
@@ -302,5 +303,60 @@ describe("addToListSchema", () => {
         });
 
         expect(result.success).toBe(true);
+    });
+});
+
+/**
+ * The credential fields, which are the ones a paste can get wrong silently.
+ *
+ * This is the guard that was missing when a browser password manager filled
+ * the Resend key field with a database password: the webhook secret had a
+ * prefix check from the beginning and the API key had none, `setSecret` took
+ * whatever arrived, and the instance answered `400 API key is invalid` to
+ * every authenticated provider read from that moment on. Sync is where it
+ * surfaced, because Sync is the only such read a person triggers by hand.
+ */
+describe("emailConfigSchema", () => {
+    const valid = {
+        domain: "mail.example.com",
+        fromEmail: "hello@mail.example.com",
+        fromName: "Acme",
+        hasStoredKey: false,
+    };
+
+    const parse = (overrides: Record<string, unknown>) =>
+        emailConfigSchema.safeParse({ ...valid, ...overrides });
+
+    const messages = (result: ReturnType<typeof parse>) =>
+        result.success ? [] : result.error.issues.map((issue) => issue.message);
+
+    it("accepts a key with the Resend prefix", () => {
+        expect(parse({ apiKey: "re_1234567890" }).success).toBe(true);
+    });
+
+    it("rejects anything that is not a Resend key", () => {
+        // The exact shape of the incident: a 16-character password.
+        const result = parse({ apiKey: "Sup3rSecretPass." });
+
+        expect(result.success).toBe(false);
+        expect(messages(result)).toContain("Resend API keys start with `re_`.");
+    });
+
+    it("still allows a blank key when one is already stored", () => {
+        // Blank means "keep the stored key", which is what the form's own
+        // hint promises. The prefix rule must not turn that into an error.
+        expect(parse({ apiKey: "", hasStoredKey: true }).success).toBe(true);
+    });
+
+    it("keeps requiring a key when none is stored", () => {
+        expect(messages(parse({ apiKey: "" }))).toContain(
+            "An API key is required before you can send anything.",
+        );
+    });
+
+    it("holds the same rule for the webhook secret", () => {
+        expect(messages(parse({ apiKey: "re_ok", webhookSecret: "not-a-secret" }))).toContain(
+            "Resend webhook secrets start with `whsec_`.",
+        );
     });
 });

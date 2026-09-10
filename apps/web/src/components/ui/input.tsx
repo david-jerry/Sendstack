@@ -59,4 +59,39 @@ function Select({ className, children, ...props }: React.ComponentProps<"select"
   );
 }
 
-export { Input, Select, Textarea };
+/**
+ * An `Input` for a credential: a key, a token, a signing secret.
+ *
+ * It exists for one attribute that is easy to get wrong and expensive when it
+ * is. `autoComplete="off"` does **not** stop a browser filling a
+ * `type="password"` field — Chrome and Safari both ignore it there and offer
+ * the password saved for the site. On this instance that happened: a database
+ * password was autofilled into Settings → Email's Resend key field and saved,
+ * and every authenticated provider read afterwards came back
+ * `400 API key is invalid`. Sync surfaced it, because Sync is the only one of
+ * those reads a person triggers by hand.
+ *
+ * `new-password` is the value that suppresses it, and the two `data-`
+ * attributes are 1Password's and LastPass's equivalents. Written once here
+ * rather than on each of the seven credential fields, because the seventh is
+ * where somebody forgets.
+ *
+ * Not a defence against a determined autofill — nothing in HTML is. The
+ * server-side guard is `verifyResendKey`, which asks Resend whether the
+ * string is a key before it is stored.
+ */
+function SecretInput({ className, ...props }: React.ComponentProps<"input">) {
+  return (
+    <Input
+      type="password"
+      autoComplete="new-password"
+      spellCheck={false}
+      data-1p-ignore
+      data-lpignore="true"
+      {...(className ? { className } : {})}
+      {...props}
+    />
+  );
+}
+
+export { Input, SecretInput, Select, Textarea };

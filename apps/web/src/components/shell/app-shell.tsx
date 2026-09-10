@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@sendstack/theme";
+import { ActivityBell } from "./activity-bell";
 import { AppSidebar, type Branding, type FolderCounts } from "./app-sidebar";
 import type { ProfileUser } from "./profile-dialog";
 import { ComposeProvider } from "@/components/compose/compose-provider";
@@ -13,6 +14,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { ActivityItem } from "@/lib/queries/activity";
 
 const TITLES: Record<string, string> = {
   "/inbox": "Inbox",
@@ -47,12 +49,15 @@ export function AppShell({
   user,
   counts,
   branding,
+  activity,
   defaultSidebarOpen,
   children,
 }: {
   user: ProfileUser;
   counts: FolderCounts;
   branding: Branding;
+  /** The Activity bell's server-rendered seed. Rendered twice; see below. */
+  activity: ActivityItem[];
   /** Read from a cookie on the server, so the first paint is the right width. */
   defaultSidebarOpen: boolean;
   children: React.ReactNode;
@@ -74,7 +79,7 @@ export function AppShell({
           it for a single frame. */}
       <ProfileProvider user={user}>
         <ComposeProvider>
-          <AppSidebar user={user} counts={counts} branding={branding} />
+          <AppSidebar user={user} counts={counts} branding={branding} activity={activity} />
 
           <SidebarInset className="min-h-0 min-w-0 overflow-hidden bg-card md:border md:border-border">
             {/* Above the header, not below it: losing the network changes what
@@ -88,6 +93,19 @@ export function AppShell({
             <header className="flex h-12 shrink-0 items-center gap-1 border-b px-2 md:hidden">
               <SidebarTrigger />
               <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{title}</span>
+              {/* A second `ActivityBell`, and the only duplicated control in
+                  the shell. The rail's copy is behind the drawer here, so on a
+                  phone a domain that stopped verifying would otherwise take
+                  two taps to notice.
+
+                  Two mounted instances are safe *because the toast is not in
+                  the component*: it is raised once in `hooks/use-realtime.ts`,
+                  from the app's single `EventSource`. Everything these two
+                  hold is a prop or store state, so they cannot disagree — and
+                  the unread marker they share is one `localStorage` key, read
+                  by both. Move the toast into the bell and this becomes two
+                  toasts per event at every width below `md`. */}
+              <ActivityBell initial={activity} variant="icon" />
               <ThemeToggle />
             </header>
 

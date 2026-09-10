@@ -22,10 +22,14 @@ import { claimOnce, publishRealtime, releaseClaim } from "@sendstack/redis";
 import {
   SOFT_BOUNCE_LIMIT,
   bareEvent,
+  describeAccountEvent,
+  isAccountEventType,
   isDeliveryEventName,
   outboundStatusForEvent,
   parseAddress,
   recipientStatusForEvent,
+  suppressionReasonFromOrigin,
+  type SuppressionReason,
 } from "@sendstack/shared";
 
 export const runtime = "nodejs";
@@ -63,6 +67,13 @@ export const dynamic = "force-dynamic";
  *  6. **Return 200 for anything already handled or unrecognised.** A non-2xx
  *     puts the event back on the retry ladder for ten hours. Reserve failure
  *     for cases where retrying could actually help.
+ *  7. **All nineteen event types are handled, in three families.** `email.received`
+ *     is inbound; the `email.*` delivery events move statuses; and the ten
+ *     account events — domains, Resend's contacts, Resend's suppression list —
+ *     are described and announced by `handleAccountEvent`. Of those ten only
+ *     `suppression.added` writes anything. A payload the describer cannot read
+ *     is stored, logged and 200'd, never 500'd: Resend has changed payload
+ *     shapes before, and a retry cannot fix a shape.
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();
@@ -112,6 +123,8 @@ export async function POST(request: Request) {
         await handleInbound(tx, event.data, effects);
       } else if (isDeliveryEvent(event)) {
         await handleDelivery(tx, event, eventId, effects);
+      } else if (isAccountEventType(event.type)) {
+        await handleAccountEvent(tx, event, eventId, effects);
       }
       return { deduped: false, effects };
     });
@@ -230,6 +243,8 @@ async function handleDelivery(
     to?: string[];
     tags?: Record<string, string>;
     bounce?: { type?: string; subType?: string; message?: string };
+    failed?: { reason?: string };
+    suppressed?: { message?: string; type?: string };
   };
 
   const incoming = recipientStatusForEvent(event.type);
@@ -241,7 +256,23 @@ async function handleDelivery(
     ? sql`cr.id = ${recipientId}::uuid`
     : sql`cr.provider_message_id = ${messageId}`;
 
-  const detail = data.bounce?.message ?? null;
+  /**
+   * Resend puts the reason under a different key for each kind of failure, and
+   * this read only the bounce one.
+   *
+   * `email.bounced` carries `data.bounce.message`, `email.failed` carries
+   * `data.failed.reason`, `email.suppressed` carries `data.suppressed.message`.
+   * So every failure that was not a bounce stored `error IS NULL`: the row said
+   * `failed`, the thread view had nothing to show for it, and the bounce push
+   * notification — which names `error` — went out with no reason in it.
+   *
+   * The coalesce order is not a precedence rule. Exactly one of the three keys
+   * is present on any given event, because each belongs to a different event
+   * type, so reordering these would change nothing. Written as a chain rather
+   * than a switch on `event.type` only because that is one fewer thing to keep
+   * in step with `DELIVERY_EVENT_NAMES`.
+   */
+  const detail = data.bounce?.message ?? data.failed?.reason ?? data.suppressed?.message ?? null;
 
   /**
    * The address this event is about — parsed, not merely lowercased.
@@ -463,17 +494,30 @@ async function handleDelivery(
       );
 
       /**
-       * A bounce is worth interrupting someone about.
+       * A bounce or a complaint is worth interrupting someone about.
        *
        * Everything else here is informational — a delivery or an open belongs
        * in the thread, not on a lock screen. A reply that did not arrive is
        * the one case where the sender needs to know now, because the useful
        * response is to try another address.
+       *
+       * A complaint joins them on the same test, and is arguably the more
+       * urgent of the two: it suppresses the address immediately (below) and
+       * it is the event that damages sending reputation, so an operator
+       * watching a campaign go out needs to see it while the campaign is
+       * still going out. It gets its own title because "could not be
+       * delivered" is the wrong sentence for a message that arrived and was
+       * marked as spam.
        */
-      if (event.type === "email.bounced" || event.type === "email.failed") {
+      if (
+        event.type === "email.bounced" ||
+        event.type === "email.failed" ||
+        event.type === "email.complained"
+      ) {
+        const complaint = event.type === "email.complained";
         effects.push(async () => {
           await broadcastPush({
-            title: "Message could not be delivered",
+            title: complaint ? "Message marked as spam" : "Message could not be delivered",
             /**
              * The stored error, then the incoming one — the same first-wins
              * order as `error` itself and as the realtime publish above.
@@ -487,10 +531,19 @@ async function handleDelivery(
              * line reading `Audit Person <a@b.com> did not receive…` is the
              * same unparsed value that broke the suppression write below.
              */
-            body:
-              row.error ?? detail ?? `${address ?? "The recipient"} did not receive your message.`,
-            url: "/sent",
-            tag: `bounce:${row.id}`,
+            body: complaint
+              ? `${address ?? "A recipient"} marked your message as spam. The address has been suppressed.`
+              : (row.error ??
+                detail ??
+                `${address ?? "The recipient"} did not receive your message.`),
+            url: complaint ? "/suppressions" : "/sent",
+            /**
+             * Distinct per outcome, so a complaint arriving after a bounce on
+             * the same message does not silently replace it. They are two
+             * different things to know and the tag is what decides whether
+             * the second one is heard.
+             */
+            tag: `${complaint ? "complaint" : "bounce"}:${row.id}`,
           });
         });
       }
@@ -567,11 +620,107 @@ async function handleDelivery(
   }
 }
 
+/**
+ * The ten Resend events that are about the account rather than a message.
+ *
+ * Domains, Resend's own contact audience, and Resend's suppression list. All
+ * ten were stored in `email_events` and acted on by nothing, so a sending
+ * domain that stopped verifying — which breaks every subsequent send — was
+ * discoverable only by reading the raw event table.
+ *
+ * **Only one of the ten writes anything.** `suppression.added` is mirrored,
+ * because a do-not-send decision that lives only in Resend's dashboard would
+ * make invariant 5 false for our own send paths: they check the local
+ * `suppressions` table, not the provider. Everything else notifies and stops:
+ *
+ *  - `suppression.removed` deliberately does **not** delete locally. Resend
+ *    removing its own entry is not evidence the address is safe; ours may have
+ *    come from a complaint, and un-suppressing on a provider event would be a
+ *    silent way to mail somebody who asked us not to.
+ *  - `contact.*` write nothing at all. `contacts` is ours — it is populated by
+ *    imports and by the app — and mirroring Resend's audience into it would
+ *    mean a `contact.deleted` cascading through `campaign_recipients`
+ *    (`onDelete: "cascade"`) and erasing the campaign history that the
+ *    campaign counters are reconciled against.
+ *  - `domain.*` have nothing local to write; the value is entirely in being
+ *    told.
+ */
+async function handleAccountEvent(
+  tx: DbExecutor,
+  event: { type: string; data: unknown },
+  eventId: string,
+  effects: AfterCommit[],
+) {
+  const activity = describeAccountEvent(event.type, event.data);
+
+  /**
+   * A payload we cannot describe is stored and ignored — rule 6 in the
+   * docblock at the top of this file. Resend has changed payload shapes
+   * before; a 500 here would put an event on a ten-hour retry ladder that
+   * cannot succeed, and drop nothing but a notification if it did.
+   */
+  if (!activity) {
+    console.warn("[webhook] account event not describable", { type: event.type, eventId });
+    return;
+  }
+
+  if (activity.kind === "suppression.added") {
+    await suppress(
+      tx,
+      activity.subject,
+      suppressionReasonFromOrigin(activity.origin),
+      `Added to Resend's suppression list (${activity.origin ?? "origin not reported"})`,
+      eventId,
+      effects,
+    );
+  }
+
+  effects.push(() =>
+    publishRealtime({
+      type: "account.activity",
+      at: new Date().toISOString(),
+      eventId,
+      ...activity,
+    }),
+  );
+
+  /**
+   * Three of the ten are worth interrupting somebody about, on the same test
+   * the bounce notification above uses: does the useful response have to
+   * happen now?
+   *
+   * A domain that changed or vanished stops mail leaving the building, and an
+   * address Resend refuses is one an operator may want to look at. A domain
+   * being *created* is something the operator just did themselves, and
+   * contacts and suppression removals change nothing about whether sending
+   * works — those stay in the bell.
+   */
+  const push =
+    activity.kind === "domain.updated"
+      ? { title: "Sending domain changed", tag: `domain:${activity.subject}` }
+      : activity.kind === "domain.deleted"
+        ? { title: "Sending domain removed", tag: `domain:${activity.subject}` }
+        : activity.kind === "suppression.added"
+          ? { title: "Address suppressed by Resend", tag: `suppression:${activity.subject}` }
+          : null;
+
+  if (push) {
+    effects.push(async () => {
+      await broadcastPush({
+        title: push.title,
+        body: activity.summary,
+        url: activity.href ?? "/settings?tab=email",
+        tag: push.tag,
+      });
+    });
+  }
+}
+
 /** Add to the do-not-send list and mark the contact, then tell the UI. */
 async function suppress(
   tx: DbExecutor,
   email: string,
-  reason: "hard_bounce" | "soft_bounce_limit" | "complaint",
+  reason: SuppressionReason,
   detail: string | null,
   eventId: string,
   effects: AfterCommit[],
@@ -582,12 +731,37 @@ async function suppress(
     ON CONFLICT (email) DO NOTHING
   `);
 
-  await tx.execute(sql`
-    UPDATE contacts
-    SET status = ${reason === "complaint" ? "complained" : "bounced"}::contact_status,
-        updated_at = now()
-    WHERE email = ${email}
-  `);
+  /**
+   * Whether the contact row is marked too, which depends on what the reason is
+   * evidence *of*.
+   *
+   * This used to be unconditional — `complaint` became `complained` and
+   * everything else became `bounced` — which was correct while the only three
+   * callers were a hard bounce, a soft-bounce limit and a complaint. Resend's
+   * `suppression.added` widened the input: an operator adding an address by
+   * hand in Resend's dashboard arrives here as `manual`, and calling that a
+   * bounce would put "Bounced" against a mailbox nobody has claimed is dead.
+   *
+   * A null status is not a weaker suppression. The `suppressions` row above is
+   * what every send path consults (`isUnsendable`, `packages/db/src/suppression.ts`),
+   * so the address is blocked either way; the contact's status is a statement
+   * about the mailbox's health, and for a manual entry we have none to make.
+   */
+  const contactStatus =
+    reason === "complaint"
+      ? "complained"
+      : reason === "hard_bounce" || reason === "soft_bounce_limit"
+        ? "bounced"
+        : null;
+
+  if (contactStatus) {
+    await tx.execute(sql`
+      UPDATE contacts
+      SET status = ${contactStatus}::contact_status,
+          updated_at = now()
+      WHERE email = ${email}
+    `);
+  }
 
   effects.push(() =>
     publishRealtime({

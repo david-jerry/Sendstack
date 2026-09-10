@@ -23,6 +23,7 @@ import { ThemeToggle } from "@sendstack/theme";
 import { ComposeButton } from "@/components/compose/compose-button";
 import { InstallItem } from "@/components/pwa/install-item";
 import { NotificationsItem } from "@/components/pwa/notifications-item";
+import { ActivityBell } from "@/components/shell/activity-bell";
 import { NavUser } from "@/components/shell/nav-user";
 import type { ProfileUser } from "@/components/shell/profile-dialog";
 import {
@@ -41,6 +42,7 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar";
+import type { ActivityItem } from "@/lib/queries/activity";
 import { cn, formatCount } from "@/lib/utils";
 import { useUnreadCount } from "@/stores/realtime-store";
 
@@ -263,10 +265,16 @@ export function AppSidebar({
   user,
   counts,
   branding,
+  activity,
 }: {
   user: ProfileUser;
   counts: FolderCounts;
   branding: Branding;
+  /**
+   * The server-rendered seed for the Activity bell, re-read on every
+   * navigation. The bell merges it with what SSE has delivered since.
+   */
+  activity: ActivityItem[];
 }) {
   const pathname = usePathname();
   const { dismissMobile } = useSidebar();
@@ -343,6 +351,11 @@ export function AppSidebar({
         <SidebarGroup className="mt-auto py-0">
           <SidebarGroupContent>
             <SidebarMenu>
+              {/* First in the group because it is the only row here that can
+                  demand attention: a domain that stopped verifying breaks
+                  every send, and a row below "Install" is a row nobody looks
+                  at. */}
+              <ActivityBell initial={activity} />
               {/* Both render nothing unless they can act, so this group is
                   the same three rows as before on a browser that cannot
                   install and a session that already has notifications on. */}

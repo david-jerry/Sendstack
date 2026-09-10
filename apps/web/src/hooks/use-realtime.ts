@@ -2,7 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { parseRealtimeEvent } from "@sendstack/shared";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { parseRealtimeEvent, type RealtimeEventType } from "@sendstack/shared";
+import { REALTIME_INVALIDATIONS } from "@/lib/query-keys";
+import { armSound, playEventSound } from "@/lib/notification-sound";
 import { useRealtimeStore } from "@/stores/realtime-store";
 
 /**
@@ -22,10 +26,21 @@ import { useRealtimeStore } from "@/stores/realtime-store";
  */
 export function useRealtime(options?: { initialUnread?: number }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const apply = useRealtimeStore((s) => s.apply);
   const setConnection = useRealtimeStore((s) => s.setConnection);
   const setUnreadCount = useRealtimeStore((s) => s.setUnreadCount);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Event types seen since the last flush, so a burst invalidates each list
+   * once rather than once per message.
+   *
+   * A `Set` in a ref and not state: writing it must not render, and the
+   * debounced flush below is the only reader. Twenty replies landing together
+   * cost one `["threads"]` invalidation, which is the same economy the
+   * debounced refresh was already buying for the Server Components.
+   */
+  const pendingTypes = useRef<Set<RealtimeEventType>>(new Set());
 
   const initialUnread = options?.initialUnread;
   /**
@@ -58,6 +73,14 @@ export function useRealtime(options?: { initialUnread?: number }) {
   });
 
   useEffect(() => {
+    /**
+     * Audio has to wait for a gesture; the listener that notices one is
+     * armed here because this hook is mounted exactly once, in the shell.
+     * Arming it inside the sound module's own first call would be too late
+     * — the first event is precisely the one that would be silent.
+     */
+    armSound();
+
     const source = new EventSource("/api/realtime/stream");
 
     /**
@@ -79,10 +102,79 @@ export function useRealtime(options?: { initialUnread?: number }) {
     source.onmessage = (message) => {
       const event = parseRealtimeEvent(message.data);
       if (!event) return;
+
+      /**
+       * The Activity toast lives here, not in `ActivityBell`.
+       *
+       * The bell is mounted **twice** — the sidebar row and the mobile header
+       * — so a toast raised from inside it would appear twice for one event at
+       * every width that renders both. There is exactly one `EventSource` for
+       * the app, and this is it, so a toast raised here is raised once however
+       * many bells are on screen.
+       *
+       * The store is consulted *before* `apply`, which is what makes this
+       * idempotent: `apply` dedupes `account.activity` on `eventId`, so asking
+       * afterwards would always say "already present". Resend's retry ladder
+       * can deliver the same `svix-id` again hours later (invariant 4,
+       * realtime expectation 2) and this is where that stops being a second
+       * toast.
+       */
+      const duplicateActivity =
+        event.type === "account.activity" &&
+        useRealtimeStore.getState().activity.some((item) => item.eventId === event.eventId);
+
+      if (event.type === "account.activity" && !duplicateActivity) {
+        const href = event.href;
+        toast(event.summary, {
+          // Only offered where the describer found somewhere to go: an
+          // "Open" that does nothing is worse than no action at all.
+          ...(href ? { action: { label: "Open", onClick: () => router.push(href) } } : {}),
+        });
+      }
+
+      /**
+       * The cue, raised here for the same reason the Activity toast is: one
+       * `EventSource` for the app means one sound per event, however many
+       * components are mounted. Before `apply`, so that a duplicate
+       * `account.activity` — which `apply` drops on `eventId` — is also
+       * silent the second time, matching the toast exactly.
+       */
+      if (event.type !== "account.activity" || !duplicateActivity) playEventSound(event);
+
       apply(event);
 
+      pendingTypes.current.add(event.type);
+
+      /**
+       * Both halves of the refresh, on one timer.
+       *
+       * `router.refresh()` re-renders the Server Components — the folder
+       * counts, the bell's seed, the thread reader. It does **not** touch
+       * TanStack Query, and every mailbox list is a TanStack query seeded
+       * from a prop that is ignored once the cache holds anything. Refreshing
+       * without invalidating is what made an arriving message move the unread
+       * badge while the list beneath it stayed exactly as it was.
+       *
+       * Invalidation first, so both requests are in flight together rather
+       * than the list waiting on the RSC payload.
+       */
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
-      refreshTimer.current = setTimeout(() => router.refresh(), 400);
+      refreshTimer.current = setTimeout(() => {
+        const types = Array.from(pendingTypes.current);
+        pendingTypes.current.clear();
+
+        const seen = new Set<string>();
+        for (const type of types) {
+          for (const queryKey of REALTIME_INVALIDATIONS[type]) {
+            const identity = queryKey.join("/");
+            if (seen.has(identity)) continue;
+            seen.add(identity);
+            void queryClient.invalidateQueries({ queryKey });
+          }
+        }
+
+        router.refresh();
+      }, 400);
     };
 
     source.onerror = () => {
@@ -96,7 +188,7 @@ export function useRealtime(options?: { initialUnread?: number }) {
       source.close();
       setConnection("closed");
     };
-  }, [apply, router, setConnection]);
+  }, [apply, queryClient, router, setConnection]);
 }
 
 /** Mounted once in the app shell. Renders nothing. */

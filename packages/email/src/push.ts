@@ -25,10 +25,21 @@ export type PushPayload = {
   /** Where tapping the notification should land. Same-origin path. */
   url?: string;
   /**
-   * Collapses repeats. Ten replies to one thread should be one notification,
-   * so this is normally the thread key rather than the message id.
+   * Collapses repeats: a notification replaces any earlier one sharing this
+   * tag rather than stacking beneath it.
    */
   tag?: string;
+  /**
+   * Whether replacing an earlier notification alerts the device again.
+   * Defaults to true, which is right when the second notification is a
+   * second thing to know about.
+   *
+   * Set false when a push exists only to *improve* one already on screen —
+   * inbound mail is sent twice on purpose, once from the webhook's metadata
+   * and again once the body has been fetched, and a device that buzzes
+   * twice for one message is a device whose owner turns notifications off.
+   */
+  renotify?: boolean;
 };
 
 export type PushResult = {

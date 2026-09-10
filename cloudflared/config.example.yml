@@ -25,7 +25,7 @@ credentials-file: ~/.cloudflared/<TUNNEL-UUID>.json
 
 ingress:
   - hostname: mail.example.com
-    service: http://localhost:3000
+    service: http://localhost:3005
     originRequest:
       # The dev server answers on plain HTTP; Cloudflare terminates TLS at the
       # edge and the browser only ever sees HTTPS. That is what makes secure

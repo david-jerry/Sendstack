@@ -262,8 +262,12 @@ function DeliveryBadge({ state }: { state: string | null }) {
       return <Badge tone="danger">Not sent</Badge>;
     case "complained":
       return <Badge tone="danger">Marked as spam</Badge>;
+    case "suppressed":
+      return <Badge tone="danger">Suppressed</Badge>;
     case "delivery_delayed":
       return <Badge tone="warning">Delayed</Badge>;
+    case "scheduled":
+      return <Badge tone="neutral">Scheduled</Badge>;
     case "clicked":
       return <Badge tone="success">Clicked</Badge>;
     case "opened":

@@ -32,7 +32,18 @@ const args = process.argv.slice(2);
 const apply = args.includes("--apply");
 /** Inside `pnpm dev` the banner competes with two other processes. */
 const quiet = args.includes("--quiet");
-const port = Number(process.env.PORT ?? 3000);
+/**
+ * The port the app is served on, and the one this tunnel forwards to.
+ *
+ * The default has to equal `apps/web`'s `dev` script, not merely resemble it.
+ * When the two disagreed the failure was silent and expensive: `next dev`
+ * quietly steps to the next free port when its own is taken — printing a
+ * warning nobody reads in a `concurrently` pane — while this kept forwarding
+ * to the port it assumed, so the tunnel served whatever else was listening
+ * there. `3000` is the most contested port on any developer's machine, which
+ * is why neither half defaults to it.
+ */
+const port = Number(process.env.PORT ?? 3005);
 
 /**
  * Where a named tunnel's config might live, most specific first.

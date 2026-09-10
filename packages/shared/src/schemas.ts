@@ -545,6 +545,28 @@ export const emailConfigSchema = z
         message: "An API key is required before you can send anything.",
       });
     }
+    /**
+     * The prefix check the webhook secret has always had, for the key that
+     * had none.
+     *
+     * Not cosmetic. The field is `type="password"`, so a browser password
+     * manager offers to fill it, and on this instance one did: the database
+     * password was stored as the Resend key, `updateEmailSettings` wrote it
+     * without a murmur, and every provider read afterwards came back
+     * `400 API key is invalid` — including Sync, which is how it surfaced.
+     * Sending kept working only until the cached client expired.
+     *
+     * A prefix test is not proof the key is *live* — `verifyResendKey` asks
+     * Resend that, and both writers now call it. This is the cheap half, and
+     * it is the half that catches the paste that was never a key at all.
+     */
+    if (value.apiKey && !value.apiKey.startsWith("re_")) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["apiKey"],
+        message: "Resend API keys start with `re_`.",
+      });
+    }
     if (value.webhookSecret && !value.webhookSecret.startsWith("whsec_")) {
       ctx.addIssue({
         code: "custom",

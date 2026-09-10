@@ -96,6 +96,17 @@ const fixtures: Record<RealtimeEventType, RealtimeEvent[]> = {
       event: "delivered",
       detail: null,
     },
+    // `email.suppressed`, which the route stored and ignored until `suppressed`
+    // joined `DELIVERY_EVENT_NAMES`. Its reason arrives as `data.suppressed.message`,
+    // not `data.bounce.message`, which is why `error` used to come back null.
+    {
+      type: "outbound.updated",
+      at: "2026-09-09T08:00:00.000Z",
+      messageId: "7f1c0f1e-0000-4000-8000-000000000008",
+      threadKey: null,
+      event: "suppressed",
+      detail: "on the account suppression list",
+    },
   ],
 
   // `packages/jobs/src/functions/send-campaign.ts`.
@@ -117,6 +128,33 @@ const fixtures: Record<RealtimeEventType, RealtimeEvent[]> = {
       at: "2026-09-09T08:00:00.000Z",
       email: "them@example.test",
       reason: "complained",
+    },
+  ],
+
+  // `api/webhooks/resend/route.ts`, `handleAccountEvent`.
+  "account.activity": [
+    {
+      type: "account.activity",
+      at: "2026-09-09T08:00:00.000Z",
+      eventId: "msg_2abcdefghijklmnop",
+      kind: "suppression.added",
+      subject: "them@example.test",
+      summary: "them@example.test was added to Resend's suppression list (bounce)",
+      href: "/suppressions",
+      origin: "bounce",
+    },
+    // A domain event: nowhere useful to link on a deletion, and no origin.
+    // Both nullable fields exercised in their null state, which is what caught
+    // `href` being declared non-nullable.
+    {
+      type: "account.activity",
+      at: "2026-09-09T08:00:00.000Z",
+      eventId: "msg_2abcdefghijklmnoq",
+      kind: "domain.deleted",
+      subject: "mail.example.test",
+      summary: "Domain mail.example.test was removed from Resend",
+      href: null,
+      origin: null,
     },
   ],
 };

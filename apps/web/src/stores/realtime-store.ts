@@ -1,7 +1,11 @@
 "use client";
 
 import { create } from "zustand";
-import type { RealtimeEvent } from "@sendstack/shared";
+import {
+  ACCOUNT_ACTIVITY_LIMIT,
+  isTerminalDeliveryEvent,
+  type RealtimeEvent,
+} from "@sendstack/shared";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 
@@ -9,6 +13,16 @@ type CampaignProgress = { status: string; sentCount: number; totalRecipients: nu
 
 /** The last thing the provider said about one message we sent. */
 export type OutboundEvent = { event: string; at: string; detail: string | null };
+
+/**
+ * An account-level change — a domain, a Resend contact, a suppression entry —
+ * as it arrives live.
+ *
+ * Structurally an `account.activity` event minus its discriminator, which is
+ * also the shape `recentAccountActivity()` returns from Postgres, so the bell
+ * can concatenate the two lists and sort without a mapping step between them.
+ */
+export type ActivityLive = Omit<Extract<RealtimeEvent, { type: "account.activity" }>, "type">;
 
 type RealtimeState = {
   connection: ConnectionState;
@@ -60,6 +74,13 @@ type RealtimeState = {
    * confirmed and one that feels like it vanished.
    */
   outboundEvents: Record<string, OutboundEvent>;
+  /**
+   * Account changes that arrived since this page rendered, newest first and
+   * capped at `ACCOUNT_ACTIVITY_LIMIT` — the same cap the server query and the
+   * bell use, because the bell shows one merged list and holding more here than
+   * can ever be displayed only grows a store that is never garbage collected.
+   */
+  activity: ActivityLive[];
   lastEventAt: string | null;
 
   setConnection: (state: ConnectionState) => void;
@@ -83,6 +104,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
   countedThreadKeys: [],
   campaignProgress: {},
   outboundEvents: {},
+  activity: [],
   lastEventAt: null,
 
   setConnection: (connection) => set({ connection }),
@@ -150,7 +172,11 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
            * rule the SQL applies and for the same reason.
            */
           const previous = state.outboundEvents[event.messageId];
-          if (previous && FINAL_EVENTS.has(previous.event) && !FINAL_EVENTS.has(event.event)) {
+          if (
+            previous &&
+            isTerminalDeliveryEvent(previous.event) &&
+            !isTerminalDeliveryEvent(event.event)
+          ) {
             return base;
           }
 
@@ -181,14 +207,28 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
         }
         case "suppression.added":
           return base;
+        case "account.activity": {
+          /**
+           * Deduped on `eventId` rather than appended.
+           *
+           * The same event reaches this store by two legitimate routes — the
+           * SSE connection, and the server-rendered seed the bell merges with
+           * — and Resend's own retry ladder can deliver it again hours later
+           * with a fresh delivery but the same `svix-id`. Realtime contract
+           * expectation 2: consumers handle duplicates safely.
+           */
+          if (state.activity.some((item) => item.eventId === event.eventId)) return base;
+          const { type: _type, ...item } = event;
+          return {
+            ...base,
+            activity: [item, ...state.activity].slice(0, ACCOUNT_ACTIVITY_LIMIT),
+          };
+        }
         default:
           return state;
       }
     }),
 }));
-
-/** Once one of these has landed, a weaker event cannot displace it. */
-const FINAL_EVENTS = new Set(["bounced", "complained", "failed"]);
 
 export const useUnreadCount = () => useRealtimeStore((s) => s.unreadCount);
 /** The live delivery state of a message we sent, if the provider has spoken. */
@@ -197,3 +237,5 @@ export const useOutboundEvent = (messageId: string) =>
 export const useConnection = () => useRealtimeStore((s) => s.connection);
 export const useCampaignProgress = (campaignId: string) =>
   useRealtimeStore((s) => s.campaignProgress[campaignId]);
+/** Account changes seen live, newest first. Merged with the server seed by the bell. */
+export const useActivity = () => useRealtimeStore((s) => s.activity);

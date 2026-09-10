@@ -14,7 +14,8 @@ vi.mock("@sendstack/theme", () => ({
     <button type="button" aria-label="Toggle theme" {...props} />
   ),
 }));
-vi.mock("@/stores/realtime-store", () => ({ useUnreadCount: () => 3 }));
+/** `useActivity` is the Activity bell's live half; nothing here exercises it. */
+vi.mock("@/stores/realtime-store", () => ({ useUnreadCount: () => 3, useActivity: () => [] }));
 vi.mock("@sendstack/auth/client", () => ({
   signOut: vi.fn(async () => ({ error: null })),
   authClient: {
@@ -60,7 +61,7 @@ function renderSidebar({ defaultOpen = true }: { defaultOpen?: boolean } = {}) {
           phone is not unmounted by the drawer closing behind it. */}
       <ProfileProvider user={USER}>
         <ComposeProvider>
-          <AppSidebar user={USER} counts={COUNTS} branding={BRANDING} />
+          <AppSidebar user={USER} counts={COUNTS} branding={BRANDING} activity={[]} />
         </ComposeProvider>
       </ProfileProvider>
     </SidebarProvider>,

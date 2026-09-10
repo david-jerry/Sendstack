@@ -1,4 +1,4 @@
-import { afterAll, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, expect, it, vi } from "vitest";
 import { databaseSuite } from "@test/database-suite";
 
 /**
@@ -514,5 +514,342 @@ databaseSuite("webhook delivery handling", { timeout: 60_000 }, () => {
     );
     expect(row?.status).toBe("bounced");
     expect(row?.error).toBe("550 no such user");
+  });
+});
+
+/**
+ * The ten event types the route stored and acted on for its whole first life.
+ *
+ * Two families, with opposite obligations:
+ *
+ *  - `email.failed` and `email.suppressed` are *delivery* events that were in
+ *    the vocabulary maps but not in `DELIVERY_EVENT_NAMES`, so they moved no
+ *    status; and their reason lives under a different payload key from a
+ *    bounce's, so `error` came back null even once they did.
+ *  - The eight *account* events — domains, Resend's contacts, Resend's
+ *    suppression list — now produce an `account.activity` publish, and exactly
+ *    one of them writes to the database.
+ *
+ * The write that matters most here is the one that must **not** happen:
+ * `contact.*` events touch `contacts` not at all. Mirroring Resend's audience
+ * into our own table would mean a `contact.deleted` cascading through
+ * `campaign_recipients.contact_id` (`onDelete: "cascade"`) and erasing the
+ * campaign history the counters are reconciled against.
+ */
+const accountStamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+const accountMarker = `%${accountStamp}%`;
+
+const resendSuppressed = `wh-rs-supp-${accountStamp}@example.test`;
+const manuallySuppressed = `wh-rs-manual-${accountStamp}@example.test`;
+const unsuppressed = `wh-rs-removed-${accountStamp}@example.test`;
+const resendContact = `wh-rs-contact-${accountStamp}@example.test`;
+const localOnlyContact = `wh-rs-local-${accountStamp}@example.test`;
+const failedMessage = `msg-failed-${accountStamp}`;
+const suppressedMessage = `msg-suppressed-${accountStamp}`;
+
+async function deliverAccount(suffix: string, type: string, data: Record<string, unknown>) {
+  const { POST } = await import("./route");
+  return POST(
+    new Request("http://localhost/api/webhooks/resend", {
+      method: "POST",
+      headers: { "svix-id": `${accountStamp}-${suffix}`, "content-type": "application/json" },
+      body: JSON.stringify({ type, created_at: new Date().toISOString(), data }),
+    }),
+  );
+}
+
+/** The realtime publishes of one type since the last `clearAllMocks`. */
+async function publishesOfType(type: string) {
+  const { publishRealtime } = await import("@sendstack/redis");
+  return vi
+    .mocked(publishRealtime)
+    .mock.calls.map(([event]) => event as { type: string } & Record<string, unknown>)
+    .filter((event) => event.type === type);
+}
+
+databaseSuite("webhook account and late-failure handling", { timeout: 60_000 }, () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterAll(async () => {
+    const { db, sql } = await import("@sendstack/db");
+    await db.execute(sql`DELETE FROM suppressions WHERE email LIKE ${accountMarker}`);
+    await db.execute(sql`DELETE FROM contacts WHERE email LIKE ${accountMarker}`);
+    await db.execute(
+      sql`DELETE FROM outbound_messages WHERE provider_message_id LIKE ${accountMarker}`,
+    );
+    await db.execute(sql`DELETE FROM email_events WHERE provider_event_id LIKE ${accountMarker}`);
+  });
+
+  it("stores the reason for a failure that is not a bounce", async () => {
+    const { db, sql } = await import("@sendstack/db");
+    await db.execute(sql`
+      INSERT INTO outbound_messages (thread_key, from_email, provider_message_id, status)
+      VALUES (${`thread-${accountStamp}-failed`}, ${`me-${accountStamp}@example.test`}, ${failedMessage}, 'sent')
+    `);
+
+    // `data.failed.reason`, not `data.bounce.message` — which is why this used
+    // to leave `error` null and the thread view with nothing to display.
+    await deliverAccount("failed", "email.failed", {
+      email_id: failedMessage,
+      failed: { reason: `Rejected by policy ${accountStamp}` },
+    });
+
+    const [row] = Array.from(
+      await db.execute<{ status: string; last_event: string; error: string | null }>(sql`
+        SELECT status, last_event, error FROM outbound_messages
+        WHERE provider_message_id = ${failedMessage}
+      `),
+    );
+    expect(row?.status).toBe("failed");
+    expect(row?.last_event).toBe("failed");
+    expect(row?.error).toBe(`Rejected by policy ${accountStamp}`);
+  });
+
+  it("moves a suppressed message to failed and tells the browser", async () => {
+    const { db, sql } = await import("@sendstack/db");
+    await db.execute(sql`
+      INSERT INTO outbound_messages (thread_key, from_email, provider_message_id, status)
+      VALUES (${`thread-${accountStamp}-supp`}, ${`me-${accountStamp}@example.test`}, ${suppressedMessage}, 'sent')
+    `);
+
+    await deliverAccount("email-suppressed", "email.suppressed", {
+      email_id: suppressedMessage,
+      suppressed: { message: `On the account suppression list ${accountStamp}` },
+    });
+
+    const [row] = Array.from(
+      await db.execute<{ status: string; last_event: string; error: string | null }>(sql`
+        SELECT status, last_event, error FROM outbound_messages
+        WHERE provider_message_id = ${suppressedMessage}
+      `),
+    );
+    expect(row?.status).toBe("failed");
+    expect(row?.last_event).toBe("suppressed");
+    expect(row?.error).toBe(`On the account suppression list ${accountStamp}`);
+
+    // `suppressed` had to join `DELIVERY_EVENT_NAMES` for this to be
+    // publishable at all: `outbound.updated.event` is `z.enum(...)` of it, so
+    // before the widening this event was dropped by the browser's own parse.
+    const published = await publishesOfType("outbound.updated");
+    expect(published).toHaveLength(1);
+    expect(published[0]?.event).toBe("suppressed");
+  });
+
+  /**
+   * Invariant 5. A do-not-send decision taken in Resend's dashboard has to
+   * reach our own `suppressions` table, because that is what every send path
+   * consults — the provider's list is not checked at send time.
+   *
+   * Delivered twice with one `svix-id`, per CLAUDE.md §7: one row, one push.
+   */
+  it("mirrors a Resend bounce suppression once, however many times it arrives", async () => {
+    const { db, sql } = await import("@sendstack/db");
+    const { broadcastPush } = await import("@sendstack/email");
+    await db.execute(sql`INSERT INTO contacts (email) VALUES (${resendSuppressed})`);
+
+    const first = await deliverAccount("supp-added", "suppression.added", {
+      email: resendSuppressed.toUpperCase(),
+      origin: "bounce",
+    });
+    const second = await deliverAccount("supp-added", "suppression.added", {
+      email: resendSuppressed.toUpperCase(),
+      origin: "bounce",
+    });
+
+    expect(await first.json()).toEqual({ ok: true });
+    expect(await second.json()).toEqual({ ok: true, deduped: "database" });
+
+    const rows = Array.from(
+      await db.execute<{ email: string; reason: string; source_event_id: string }>(sql`
+        SELECT email, reason, source_event_id FROM suppressions WHERE email LIKE ${accountMarker}
+      `),
+    );
+    // Normalised at ingestion (invariant 6): the payload shouted, the row does not.
+    expect(rows).toEqual([
+      {
+        email: resendSuppressed,
+        reason: "hard_bounce",
+        source_event_id: `${accountStamp}-supp-added`,
+      },
+    ]);
+
+    const [contact] = Array.from(
+      await db.execute<{ status: string }>(
+        sql`SELECT status FROM contacts WHERE email = ${resendSuppressed}`,
+      ),
+    );
+    expect(contact?.status).toBe("bounced");
+
+    expect(await publishesOfType("account.activity")).toHaveLength(1);
+    expect(await publishesOfType("suppression.added")).toHaveLength(1);
+    expect(vi.mocked(broadcastPush)).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A manual entry in Resend's dashboard is a decision about that list, not
+   * evidence the mailbox is dead — so it suppresses the address and leaves the
+   * contact's health alone. Calling it a bounce would put "Bounced" against a
+   * mailbox nobody has claimed is broken.
+   */
+  it("suppresses a manual entry without marking the contact bounced", async () => {
+    const { db, sql } = await import("@sendstack/db");
+    await db.execute(sql`INSERT INTO contacts (email) VALUES (${manuallySuppressed})`);
+
+    await deliverAccount("supp-manual", "suppression.added", {
+      email: manuallySuppressed,
+      origin: "manual",
+    });
+
+    const [row] = Array.from(
+      await db.execute<{ reason: string }>(
+        sql`SELECT reason FROM suppressions WHERE email = ${manuallySuppressed}`,
+      ),
+    );
+    expect(row?.reason).toBe("manual");
+
+    const [contact] = Array.from(
+      await db.execute<{ status: string }>(
+        sql`SELECT status FROM contacts WHERE email = ${manuallySuppressed}`,
+      ),
+    );
+    expect(contact?.status).toBe("active");
+  });
+
+  /**
+   * `suppression.removed` notifies and deletes nothing.
+   *
+   * Resend dropping its own entry is not evidence the address is safe: ours
+   * may have come from a complaint, and un-suppressing on a provider event is
+   * a silent way to mail somebody who asked us not to.
+   */
+  it("never un-suppresses locally when Resend removes its own entry", async () => {
+    const { db, sql } = await import("@sendstack/db");
+    const { broadcastPush } = await import("@sendstack/email");
+    await db.execute(sql`
+      INSERT INTO suppressions (email, reason, detail)
+      VALUES (${unsuppressed}, 'complaint', ${`seeded ${accountStamp}`})
+    `);
+
+    await deliverAccount("supp-removed", "suppression.removed", { email: unsuppressed });
+
+    const [row] = Array.from(
+      await db.execute<{ reason: string }>(
+        sql`SELECT reason FROM suppressions WHERE email = ${unsuppressed}`,
+      ),
+    );
+    expect(row?.reason).toBe("complaint");
+
+    expect(await publishesOfType("account.activity")).toHaveLength(1);
+    // Informational: nothing about sending has changed, so nothing interrupts.
+    expect(vi.mocked(broadcastPush)).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The contacts table is ours.
+   *
+   * A `contact.created` for an address we do not hold must not create it, and
+   * a `contact.deleted` for one we do hold must not remove it — the cascade on
+   * `campaign_recipients.contact_id` would take that contact's campaign
+   * history with it and leave the campaign counters disagreeing with the rows
+   * they are reconciled against.
+   */
+  it("shows Resend contact changes without writing to contacts", async () => {
+    const { db, sql } = await import("@sendstack/db");
+    const { broadcastPush } = await import("@sendstack/email");
+    await db.execute(sql`INSERT INTO contacts (email) VALUES (${localOnlyContact})`);
+
+    await deliverAccount("contact-created", "contact.created", { email: resendContact });
+    await deliverAccount("contact-deleted", "contact.deleted", { email: localOnlyContact });
+
+    // Scoped to the two addresses this test is about rather than to the run
+    // stamp: the suppression tests above seed stamped contacts of their own,
+    // and a marker-wide assertion would report their rows as this handler's
+    // writes. Still the whole list *for these two*, so a row the handler had
+    // no business creating fails the test rather than hiding behind a presence
+    // check.
+    const emails = Array.from(
+      await db.execute<{ email: string }>(sql`
+        SELECT email FROM contacts
+        WHERE email IN (${resendContact}, ${localOnlyContact})
+        ORDER BY email
+      `),
+    ).map((row) => row.email);
+
+    // The created one was not added; the deleted one was not removed.
+    expect(emails).toEqual([localOnlyContact]);
+
+    expect(await publishesOfType("account.activity")).toHaveLength(2);
+    expect(vi.mocked(broadcastPush)).not.toHaveBeenCalled();
+  });
+
+  it("announces a domain change and pushes it, writing nothing", async () => {
+    const { db, sql } = await import("@sendstack/db");
+    const { broadcastPush } = await import("@sendstack/email");
+
+    const before = Array.from(
+      await db.execute<{ n: number }>(sql`
+        SELECT (SELECT count(*) FROM contacts WHERE email LIKE ${accountMarker})
+             + (SELECT count(*) FROM suppressions WHERE email LIKE ${accountMarker}) AS n
+      `),
+    )[0]?.n;
+
+    const first = await deliverAccount("domain-updated", "domain.updated", {
+      name: `mail-${accountStamp}.example.test`,
+      status: "not_started",
+    });
+    expect(first.status).toBe(200);
+
+    const after = Array.from(
+      await db.execute<{ n: number }>(sql`
+        SELECT (SELECT count(*) FROM contacts WHERE email LIKE ${accountMarker})
+             + (SELECT count(*) FROM suppressions WHERE email LIKE ${accountMarker}) AS n
+      `),
+    )[0]?.n;
+    expect(after).toBe(before);
+
+    const published = await publishesOfType("account.activity");
+    expect(published).toHaveLength(1);
+    expect(published[0]?.summary).toBe(
+      `Domain mail-${accountStamp}.example.test is now not_started`,
+    );
+    // A domain that stopped verifying stops mail leaving the building, so this
+    // is one of the three that interrupts.
+    expect(vi.mocked(broadcastPush)).toHaveBeenCalledTimes(1);
+
+    // The replay publishes nothing: the event row dedupes before any effect is
+    // collected, so realtime cannot double-announce on Resend's retry ladder.
+    vi.clearAllMocks();
+    const replay = await deliverAccount("domain-updated", "domain.updated", {
+      name: `mail-${accountStamp}.example.test`,
+      status: "not_started",
+    });
+    expect(await replay.json()).toEqual({ ok: true, deduped: "database" });
+    expect(await publishesOfType("account.activity")).toHaveLength(0);
+    expect(vi.mocked(broadcastPush)).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A payload the describer cannot read is stored and 200'd — rule 6 in the
+   * route's docblock. Resend has changed payload shapes before, and a 500 here
+   * would put the event on a ten-hour retry ladder that cannot succeed.
+   */
+  it("stores an undescribable account payload and answers 200", async () => {
+    const { db, sql } = await import("@sendstack/db");
+
+    const response = await deliverAccount("supp-garbage", "suppression.added", {
+      origin: "bounce",
+    });
+    expect(response.status).toBe(200);
+
+    const [row] = Array.from(
+      await db.execute<{ n: number }>(sql`
+        SELECT count(*)::int AS n FROM email_events
+        WHERE provider_event_id = ${`${accountStamp}-supp-garbage`}
+      `),
+    );
+    expect(row?.n).toBe(1);
+    expect(await publishesOfType("account.activity")).toHaveLength(0);
   });
 });

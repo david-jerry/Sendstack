@@ -131,3 +131,93 @@ describe("unread badge", () => {
     expect(state().unreadCount).toBe(0);
   });
 });
+
+/**
+ * The account-activity feed behind the bell.
+ *
+ * The bell renders a merge of this list and a server-rendered seed from
+ * `email_events`, so the same event genuinely arrives twice by two routes —
+ * and a third time whenever Resend retries. Everything here is about that
+ * being harmless.
+ */
+const activity = (eventId: string, summary: string): RealtimeEvent => ({
+  type: "account.activity",
+  at: new Date().toISOString(),
+  eventId,
+  kind: "domain.updated",
+  subject: "mail.example.test",
+  summary,
+  href: "/settings?tab=email",
+  origin: null,
+});
+
+describe("account activity", () => {
+  beforeEach(() => {
+    useRealtimeStore.setState({ activity: [], outboundEvents: {} });
+  });
+
+  const state = () => useRealtimeStore.getState();
+
+  it("keeps the newest first", () => {
+    state().apply(activity("evt-1", "first"));
+    state().apply(activity("evt-2", "second"));
+    expect(state().activity.map((item) => item.eventId)).toEqual(["evt-2", "evt-1"]);
+  });
+
+  it("ignores an event id it already holds", () => {
+    // Realtime contract expectation 2. The seed/SSE overlap makes this the
+    // normal case, not an edge case.
+    state().apply(activity("evt-1", "first"));
+    state().apply(activity("evt-1", "a retry of the first"));
+    expect(state().activity).toHaveLength(1);
+    expect(state().activity[0]?.summary).toBe("first");
+  });
+
+  it("holds at most twenty, discarding the oldest", () => {
+    for (let i = 0; i < 25; i += 1) state().apply(activity(`evt-${i}`, `entry ${i}`));
+    expect(state().activity).toHaveLength(20);
+    expect(state().activity[0]?.eventId).toBe("evt-24");
+    expect(state().activity.at(-1)?.eventId).toBe("evt-5");
+  });
+
+  it("drops the discriminator so the shape matches the server seed", () => {
+    state().apply(activity("evt-1", "first"));
+    expect(state().activity[0]).not.toHaveProperty("type");
+  });
+});
+
+/**
+ * `suppressed` joined the delivery vocabulary at the same time, and the store's
+ * "a weaker event cannot displace a final one" guard is now derived from
+ * `@sendstack/shared` rather than kept as a second hand-written set here.
+ */
+describe("terminal delivery events", () => {
+  beforeEach(() => {
+    useRealtimeStore.setState({ activity: [], outboundEvents: {} });
+  });
+
+  const state = () => useRealtimeStore.getState();
+
+  const outbound = (event: string): RealtimeEvent => ({
+    type: "outbound.updated",
+    at: new Date().toISOString(),
+    messageId: "msg-1",
+    threadKey: null,
+    event: event as never,
+    detail: null,
+  });
+
+  it("does not let a later open relabel a suppressed send", () => {
+    // Resend retries for ten hours, so an `email.opened` from an earlier
+    // attempt can land after the suppression that ended the message.
+    state().apply(outbound("suppressed"));
+    state().apply(outbound("opened"));
+    expect(state().outboundEvents["msg-1"]?.event).toBe("suppressed");
+  });
+
+  it("still lets a failure land on a scheduled message", () => {
+    state().apply(outbound("scheduled"));
+    state().apply(outbound("suppressed"));
+    expect(state().outboundEvents["msg-1"]?.event).toBe("suppressed");
+  });
+});
