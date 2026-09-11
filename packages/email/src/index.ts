@@ -1,6 +1,7 @@
 export {
   resendClient,
   resetResendClient,
+  verifyResendKey,
   formatFrom,
   defaultFrom,
   ResendNotConfiguredError,

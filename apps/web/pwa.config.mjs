@@ -15,8 +15,14 @@ const config = {
    * icon before it has a network. Not the application's chunks — those are
    * content-hashed and cached as they are used, and precaching them would
    * download the entire app to serve one apology.
+   *
+   * The notification cues are here for a timing reason rather than an offline
+   * one. A sound played in response to an arriving message has to start
+   * *now*; fetched on first use it starts a few hundred milliseconds after
+   * the row it is announcing, which reads as a glitch rather than a cue. Two
+   * files, ~160KB, downloaded once at install.
    */
-  precacheGlobs: ["favicon/**/*.{png,ico,svg}"],
+  precacheGlobs: ["favicon/**/*.{png,ico,svg}", "sounds/*.mp3"],
   /** A rendered route, not a file, so the build revisions it by worker hash. */
   precacheRoutes: ["/offline"],
 };

@@ -26,7 +26,7 @@ import {
 } from "@/actions/setup";
 import { Button } from "@/components/ui/button";
 import { Field, invalid } from "@/components/ui/form-field";
-import { Input } from "@/components/ui/input";
+import { Input, SecretInput } from "@/components/ui/input";
 import { NameInput } from "@/components/ui/name-input";
 import { StepCard, TestResult } from "./shell";
 import { Help } from "./help";
@@ -107,13 +107,10 @@ export function BootstrapStep({ onDone }: { onDone: () => void }) {
           hint="Signs sessions and every unsubscribe link. Treat it as permanent."
         >
           <div className="flex gap-2">
-            <Input
+            <SecretInput
               {...register("authSecret")}
               {...invalid(errors.authSecret)}
               placeholder="at least 32 characters"
-              type="password"
-              spellCheck={false}
-              autoComplete="off"
             />
             <Button
               type="button"
@@ -257,13 +254,10 @@ export function EmailStep({
           hint={initial.hasKey ? "A key is already saved. Leave blank to keep it." : undefined}
         >
           <div className="flex gap-2">
-            <Input
+            <SecretInput
               {...register("apiKey")}
               {...invalid(errors.apiKey)}
               placeholder={initial.hasKey ? "•••••••••••••• (saved)" : "re_..."}
-              type="password"
-              spellCheck={false}
-              autoComplete="off"
             />
             <Button type="button" variant="outline" onClick={check} disabled={pending}>
               Test
@@ -308,13 +302,10 @@ export function EmailStep({
           error={errors.webhookSecret}
           hint="Needed for replies and delivery tracking. You can add it after setup."
         >
-          <Input
+          <SecretInput
             {...register("webhookSecret")}
             {...invalid(errors.webhookSecret)}
             placeholder="whsec_..."
-            type="password"
-            spellCheck={false}
-            autoComplete="off"
           />
         </Field>
 
@@ -467,13 +458,7 @@ export function RealtimeStep({
         {isRest ? (
           <Field label="Upstash REST token" error={errors.token}>
             <div className="flex gap-2">
-              <Input
-                {...register("token")}
-                {...invalid(errors.token)}
-                type="password"
-                spellCheck={false}
-                autoComplete="off"
-              />
+              <SecretInput {...register("token")} {...invalid(errors.token)} />
               <Button type="button" variant="outline" onClick={check} disabled={pending}>
                 Test
               </Button>
@@ -549,11 +534,11 @@ export function JobsStep({
         }
       >
         <Field label="Event key" help={<Help topic="inngest" />} optional error={errors.eventKey}>
-          <Input {...register("eventKey")} type="password" spellCheck={false} autoComplete="off" />
+          <SecretInput {...register("eventKey")} />
         </Field>
 
         <Field label="Signing key" optional error={errors.signingKey}>
-          <Input {...register("signingKey")} type="password" spellCheck={false} autoComplete="off" />
+          <SecretInput {...register("signingKey")} />
         </Field>
 
         <div className="rounded-lg border bg-secondary/40 p-3">

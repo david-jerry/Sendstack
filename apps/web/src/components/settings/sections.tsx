@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { Check, Copy, Lock, X } from "lucide-react";
 import { toast } from "sonner";
 import type { Provenance } from "@sendstack/config";
@@ -12,10 +12,11 @@ import {
 } from "@/actions/settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, SecretInput } from "@/components/ui/input";
 import { NameInput } from "@/components/ui/name-input";
 import { Switch } from "@/components/ui/switch";
 import { Help } from "@/components/setup/help";
+import { SaveState, useSectionAutosave } from "@/components/settings/autosave";
 import { FieldRow } from "@/components/setup/shell";
 
 /**
@@ -126,34 +127,59 @@ export function EmailSection({
   provenance: Record<string, Provenance>;
   webhookUrl: string;
 }) {
-  const [domain, setDomain] = useState(initial.domain);
-  const [fromEmail, setFromEmail] = useState(initial.fromEmail);
-  const [fromName, setFromName] = useState(initial.fromName);
-  const [postalAddress, setPostalAddress] = useState(initial.postalAddress);
-  const [rate, setRate] = useState(String(initial.ratePerSecond));
+  const [fields, setFields] = useState({
+    domain: initial.domain,
+    fromEmail: initial.fromEmail,
+    fromName: initial.fromName,
+    postalAddress: initial.postalAddress,
+    rate: String(initial.ratePerSecond),
+  });
+  /**
+   * Held apart from `fields`, because they are the only two the section
+   * does not autosave while typing, and because they are cleared after a
+   * successful write — a stored secret is never read back, so leaving the
+   * typed one on screen would claim the field holds something it does not.
+   */
   const [apiKey, setApiKey] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
-  const [pending, start] = useTransition();
 
-  const save = () =>
-    start(async () => {
+  const autosave = useSectionAutosave(
+    async (value: typeof fields & { apiKey: string; webhookSecret: string }) => {
       const result = await updateEmailSettings({
-        domain,
-        fromEmail,
-        fromName,
-        postalAddress,
-        ratePerSecond: Number(rate) || 10,
-        apiKey,
-        webhookSecret,
+        domain: value.domain,
+        fromEmail: value.fromEmail,
+        fromName: value.fromName,
+        postalAddress: value.postalAddress,
+        ratePerSecond: Number(value.rate) || 10,
+        apiKey: value.apiKey,
+        webhookSecret: value.webhookSecret,
       });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
+      if (result.ok) {
+        // Only once the write succeeded. Clearing on failure would lose a
+        // key that was rejected for a reason the operator can fix, such as
+        // a Resend outage, and leave them with nothing to correct.
+        if (value.apiKey) setApiKey("");
+        if (value.webhookSecret) setWebhookSecret("");
       }
-      setApiKey("");
-      setWebhookSecret("");
-      toast.success("Email settings saved");
-    });
+      return result;
+    },
+  );
+
+  /** A field changed: debounce a save of everything the section holds. */
+  const edit = (patch: Partial<typeof fields>) => {
+    const next = { ...fields, ...patch };
+    setFields(next);
+    // Secrets are deliberately empty here, which the action reads as "keep
+    // the stored one". See the docblock in `autosave.tsx`.
+    autosave.change({ ...next, apiKey: "", webhookSecret: "" });
+  };
+
+  /** A secret was blurred: save now, and only if something was typed. */
+  const commitSecret = (patch: { apiKey?: string; webhookSecret?: string }) => {
+    const value = patch.apiKey ?? patch.webhookSecret ?? "";
+    if (!value.trim()) return;
+    autosave.saveNow({ apiKey: "", webhookSecret: "", ...fields, ...patch });
+  };
 
   return (
     <div className="space-y-4">
@@ -163,13 +189,11 @@ export function EmailSection({
         note="Leave blank to keep the stored key. Pasting a new one replaces it."
       >
         <div className="flex items-center gap-2">
-          <Input
+          <SecretInput
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
+            onBlur={() => commitSecret({ apiKey })}
             placeholder="re_…"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
           />
           <SecretState present={initial.hasKey} />
         </div>
@@ -177,20 +201,30 @@ export function EmailSection({
       </FieldRow>
 
       <FieldRow label="Sending domain" help={<Help topic="resendDomain" />}>
-        <Input value={domain} onChange={(e) => setDomain(e.target.value)} spellCheck={false} />
+        <Input
+          value={fields.domain}
+          onChange={(e) => edit({ domain: e.target.value })}
+          onBlur={autosave.flush}
+          spellCheck={false}
+        />
         <Source provenance={provenance.resendDomain} />
       </FieldRow>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <FieldRow label="From address">
           <Input
-            value={fromEmail}
-            onChange={(e) => setFromEmail(e.target.value)}
+            value={fields.fromEmail}
+            onChange={(e) => edit({ fromEmail: e.target.value })}
+            onBlur={autosave.flush}
             spellCheck={false}
           />
         </FieldRow>
         <FieldRow label="From name">
-          <NameInput value={fromName} onChange={(e) => setFromName(e.target.value)} />
+          <NameInput
+            value={fields.fromName}
+            onChange={(e) => edit({ fromName: e.target.value })}
+            onBlur={autosave.flush}
+          />
         </FieldRow>
       </div>
 
@@ -199,8 +233,9 @@ export function EmailSection({
         note="Printed in every campaign footer. CAN-SPAM requires a physical address on commercial mail, and filters read its absence as a sign the sender cannot be found. Not used for transactional mail."
       >
         <textarea
-          value={postalAddress}
-          onChange={(e) => setPostalAddress(e.target.value)}
+          value={fields.postalAddress}
+          onChange={(e) => edit({ postalAddress: e.target.value })}
+          onBlur={autosave.flush}
           rows={3}
           placeholder={"Acme Ltd\n1 High Street\nLondon EC1A 1AA"}
           spellCheck={false}
@@ -213,8 +248,9 @@ export function EmailSection({
         note="Messages per second. Match your Resend plan — exceeding it earns 429s and hurts your domain's reputation."
       >
         <Input
-          value={rate}
-          onChange={(e) => setRate(e.target.value)}
+          value={fields.rate}
+          onChange={(e) => edit({ rate: e.target.value })}
+          onBlur={autosave.flush}
           type="number"
           min={1}
           max={1000}
@@ -224,13 +260,11 @@ export function EmailSection({
 
       <FieldRow label="Webhook signing secret" help={<Help topic="resendWebhookSecret" />}>
         <div className="flex items-center gap-2">
-          <Input
+          <SecretInput
             value={webhookSecret}
             onChange={(e) => setWebhookSecret(e.target.value)}
+            onBlur={() => commitSecret({ webhookSecret })}
             placeholder="whsec_…"
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
           />
           <SecretState present={initial.hasWebhookSecret} />
         </div>
@@ -238,9 +272,7 @@ export function EmailSection({
 
       <CopyBox label="Webhook endpoint — point Resend here" value={webhookUrl} />
 
-      <Button onClick={save} disabled={pending}>
-        {pending ? "Saving…" : "Save email settings"}
-      </Button>
+      <SaveState status={autosave.status} error={autosave.error} savedAt={autosave.savedAt} />
     </div>
   );
 }
@@ -254,7 +286,14 @@ export function RealtimeSection({
 }) {
   const [url, setUrl] = useState(initial.url);
   const [token, setToken] = useState("");
-  const [pending, start] = useTransition();
+
+  const autosave = useSectionAutosave(
+    async (value: { url: string; token: string }) => {
+      const result = await updateRealtimeSettings(value);
+      if (result.ok && value.token) setToken("");
+      return result;
+    },
+  );
 
   const isRest = /^https?:\/\//i.test(url.trim());
   const isWire = /^rediss?:\/\//i.test(url.trim());
@@ -287,7 +326,13 @@ export function RealtimeSection({
       >
         <Input
           value={url}
-          onChange={(e) => setUrl(e.target.value)}
+          onChange={(e) => {
+            setUrl(e.target.value);
+            // The token stays out of a URL edit: blank means "keep the
+            // stored one", so changing the URL never disturbs it.
+            autosave.change({ url: e.target.value, token: "" });
+          }}
+          onBlur={autosave.flush}
           placeholder="redis://localhost:6379"
           spellCheck={false}
         />
@@ -297,33 +342,19 @@ export function RealtimeSection({
       {isRest ? (
         <FieldRow label="Upstash REST token" note="Leave blank to keep the stored token.">
           <div className="flex items-center gap-2">
-            <Input
+            <SecretInput
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
+              onBlur={() => {
+                if (token.trim()) autosave.saveNow({ url, token });
+              }}
             />
             <SecretState present={initial.hasToken} />
           </div>
         </FieldRow>
       ) : null}
 
-      <Button
-        disabled={pending}
-        onClick={() =>
-          start(async () => {
-            const result = await updateRealtimeSettings({ url, token });
-            if (!result.ok) toast.error(result.error);
-            else {
-              setToken("");
-              toast.success(url ? "Live updates enabled" : "Live updates turned off");
-            }
-          })
-        }
-      >
-        {pending ? "Saving…" : "Save"}
-      </Button>
+      <SaveState status={autosave.status} error={autosave.error} savedAt={autosave.savedAt} />
     </div>
   );
 }
@@ -337,17 +368,36 @@ export function JobsSection({
 }) {
   const [eventKey, setEventKey] = useState("");
   const [signingKey, setSigningKey] = useState("");
-  const [pending, start] = useTransition();
+
+  /**
+   * Both fields are secrets, so this section only ever saves on blur —
+   * there is nothing here that autosaves while typing.
+   */
+  const autosave = useSectionAutosave(
+    async (value: { eventKey: string; signingKey: string }) => {
+      const result = await updateJobSettings(value);
+      if (result.ok) {
+        if (value.eventKey) setEventKey("");
+        if (value.signingKey) setSigningKey("");
+      }
+      return result;
+    },
+  );
+
+  const commit = (patch: { eventKey?: string; signingKey?: string }) => {
+    const value = patch.eventKey ?? patch.signingKey ?? "";
+    if (!value.trim()) return;
+    autosave.saveNow({ eventKey: "", signingKey: "", ...patch });
+  };
 
   return (
     <div className="space-y-4">
       <FieldRow label="Event key" help={<Help topic="inngest" />}>
         <div className="flex items-center gap-2">
-          <Input
+          <SecretInput
             value={eventKey}
             onChange={(e) => setEventKey(e.target.value)}
-            type="password"
-            autoComplete="off"
+            onBlur={() => commit({ eventKey })}
           />
           <SecretState present={initial.hasEventKey} />
         </div>
@@ -355,11 +405,10 @@ export function JobsSection({
 
       <FieldRow label="Signing key">
         <div className="flex items-center gap-2">
-          <Input
+          <SecretInput
             value={signingKey}
             onChange={(e) => setSigningKey(e.target.value)}
-            type="password"
-            autoComplete="off"
+            onBlur={() => commit({ signingKey })}
           />
           <SecretState present={initial.hasSigningKey} />
         </div>
@@ -367,19 +416,7 @@ export function JobsSection({
 
       <CopyBox label="Inngest endpoint — point your app here" value={inngestUrl} />
 
-      <Button
-        disabled={pending}
-        onClick={() =>
-          start(async () => {
-            await updateJobSettings({ eventKey, signingKey });
-            setEventKey("");
-            setSigningKey("");
-            toast.success("Job settings saved");
-          })
-        }
-      >
-        {pending ? "Saving…" : "Save"}
-      </Button>
+      <SaveState status={autosave.status} error={autosave.error} savedAt={autosave.savedAt} />
     </div>
   );
 }
@@ -394,7 +431,34 @@ export function AuthSection({
   canPasskey: boolean;
 }) {
   const [state, setState] = useState(initial);
-  const [pending, start] = useTransition();
+
+  /**
+   * A toggle commits immediately rather than after a debounce. There is no
+   * partially-typed state for a switch, and a switch that has visibly moved
+   * while the setting behind it has not is the one thing this section must
+   * not do — "Open registration" is on that list.
+   */
+  const autosave = useSectionAutosave(async (value: typeof initial) => {
+    const result = await updateAuthSettings(value);
+    /**
+     * Snap back on refusal.
+     *
+     * The switch moved the instant it was pressed, which is right — but if
+     * the server refuses (the last sign-in method cannot be turned off), a
+     * switch left sitting in the position it was refused is a lie about how
+     * people can get in. Reverting to the *server's* last known state, not
+     * to a diff, because that is the only value known to have been
+     * accepted.
+     */
+    if (!result.ok) setState(initial);
+    return result;
+  });
+
+  const toggle = (patch: Partial<typeof initial>) => {
+    const next = { ...state, ...patch };
+    setState(next);
+    autosave.saveNow(next);
+  };
 
   const rows = [
     { key: "emailPassword" as const, name: "Email and password", blocked: null as string | null },
@@ -424,7 +488,7 @@ export function AuthSection({
             <Switch
               checked={state[row.key]}
               disabled={Boolean(row.blocked)}
-              onCheckedChange={(value) => setState((s) => ({ ...s, [row.key]: value }))}
+              onCheckedChange={(value) => toggle({ [row.key]: value })}
               aria-label={row.name}
             />
           </div>
@@ -441,27 +505,12 @@ export function AuthSection({
         </div>
         <Switch
           checked={state.allowSignup}
-          onCheckedChange={(value) => setState((s) => ({ ...s, allowSignup: value }))}
+          onCheckedChange={(value) => toggle({ allowSignup: value })}
           aria-label="Open registration"
         />
       </div>
 
-      <Button
-        disabled={pending}
-        onClick={() =>
-          start(async () => {
-            const result = await updateAuthSettings(state);
-            if (!result.ok) {
-              toast.error(result.error);
-              setState(initial);
-              return;
-            }
-            toast.success("Sign-in settings saved");
-          })
-        }
-      >
-        {pending ? "Saving…" : "Save sign-in settings"}
-      </Button>
+      <SaveState status={autosave.status} error={autosave.error} savedAt={autosave.savedAt} />
     </div>
   );
 }

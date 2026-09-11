@@ -77,6 +77,27 @@ export async function syncInbox(): Promise<
     if (/RESEND_API_KEY|No Resend API key/i.test(message)) {
       return { ok: false, error: "No Resend API key is configured. Add one in Settings → Email." };
     }
+    /**
+     * Resend answers `400 API key is invalid` — not 401 — for a key it does
+     * not recognise, so this matched none of the cases above and the raw
+     * provider sentence reached the toast. That is the wrong sentence: it
+     * says the request was bad when what is wrong is a stored setting, and
+     * it leaves out the only place the reader can fix it.
+     *
+     * Worth naming separately from "no key configured": this instance had a
+     * key, it was simply not a Resend one — a password manager had filled
+     * the field. `verifyResendKey` now refuses that at the point of saving,
+     * but an instance that stored one before the guard existed still needs
+     * to be told where to go.
+     */
+    if (/API key is invalid|invalid.{0,12}api key/i.test(message)) {
+      return {
+        ok: false,
+        error:
+          "Resend rejected the stored API key. Re-paste it in Settings → Email — a key that " +
+          "was saved before it could be checked may not be a Resend key at all.",
+      };
+    }
     if (/restricted|permission|401|403/i.test(message)) {
       return {
         ok: false,

@@ -29,11 +29,21 @@ export { OUTBOUND_STATUSES, RECIPIENT_STATUSES, type OutboundStatus, type Recipi
 /**
  * The delivery events Resend posts to the webhook, minus the `email.` prefix.
  *
- * `emails.list()` reports a wider `last_event` vocabulary — `queued`,
- * `scheduled`, `canceled`, `suppressed` — which the maps below also cover, but
- * only these eight arrive by webhook and only these carry a recipient state.
+ * `emails.list()` reports a wider `last_event` vocabulary — it adds `queued`
+ * and `canceled`, which the maps below also cover — but only these ten arrive
+ * by webhook and only these carry a recipient state.
+ *
+ * `scheduled` and `suppressed` were stored and then dropped for as long as the
+ * route only acted on eight: both are genuine webhook events, both already had
+ * a row in each map below, and neither moved a status or reached the browser.
+ * A scheduled campaign therefore sat at `pending` until its first `sent`, and
+ * an address Resend refused to mail showed as still sending forever. They are
+ * listed here rather than only in the maps because this array — not the maps —
+ * is what `isDeliveryEventName` narrows against and what the `outbound.updated`
+ * realtime schema enumerates.
  */
 export const DELIVERY_EVENT_NAMES = [
+  "scheduled",
   "sent",
   "delivered",
   "delivery_delayed",
@@ -42,6 +52,7 @@ export const DELIVERY_EVENT_NAMES = [
   "bounced",
   "complained",
   "failed",
+  "suppressed",
 ] as const;
 
 export type DeliveryEventName = (typeof DELIVERY_EVENT_NAMES)[number];
@@ -117,14 +128,14 @@ export function bareEvent(event: string): string {
 }
 
 /**
- * Whether a stored event is one of the eight the webhook vocabulary carries.
+ * Whether a stored event is one the webhook vocabulary carries.
  *
  * Needed because `last_event` holds a wider set than `DELIVERY_EVENT_NAMES`:
- * `emails.list()` also reports `queued`, `scheduled`, `canceled` and
- * `suppressed`, and the reconciler stores whichever it was given. A consumer
- * typed to the eight — the `outbound.updated` realtime event, for one — must
- * therefore narrow rather than cast, or it publishes a value its own schema
- * rejects and the browser drops the update silently.
+ * `emails.list()` also reports `queued` and `canceled`, and the reconciler
+ * stores whichever it was given. A consumer typed to the webhook vocabulary —
+ * the `outbound.updated` realtime event, for one — must therefore narrow
+ * rather than cast, or it publishes a value its own schema rejects and the
+ * browser drops the update silently.
  */
 export function isDeliveryEventName(event: string): event is DeliveryEventName {
   return (DELIVERY_EVENT_NAMES as readonly string[]).includes(bareEvent(event));
@@ -157,6 +168,23 @@ const RECIPIENT_TERMINAL = new Set<RecipientStatus>(["bounced", "complained", "f
 
 function isRecipientTerminal(status: RecipientStatus): status is RecipientTerminal {
   return RECIPIENT_TERMINAL.has(status);
+}
+
+/**
+ * Whether an event says the message is finished and did not arrive.
+ *
+ * Exported because the browser store needs the same answer the SQL ladder
+ * gives, and had its own hand-written `FINAL_EVENTS = new Set(["bounced",
+ * "complained", "failed"])` to get it. That is the second copy of a
+ * vocabulary CLAUDE.md §5 warns about, and it had already fallen behind: when
+ * `suppressed` joined the webhook vocabulary the SQL refused to overwrite a
+ * suppression and the store happily let a retried `email.opened` relabel it.
+ *
+ * Takes an event, not a status, and both dialects of one: `bareEvent` runs
+ * first, so `email.bounced` and `bounced` answer alike.
+ */
+export function isTerminalDeliveryEvent(event: string): boolean {
+  return isRecipientTerminal(recipientStatusForEvent(event));
 }
 
 /**

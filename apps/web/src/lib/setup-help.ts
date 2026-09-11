@@ -74,7 +74,7 @@ export const HELP: Record<string, HelpTopic> = {
     steps: [
       "In Resend, open Webhooks and add an endpoint.",
       "Point it at the URL shown beside this field.",
-      "Subscribe to: email.sent, email.delivered, email.bounced, email.complained, email.opened, email.clicked and email.received.",
+      "Subscribe to every event type. Sendstack stores all of them, tracks delivery from the email.* ones, mirrors Resend's suppression list, and shows domain and contact changes in the Activity bell.",
       "Copy the signing secret — it starts with whsec_ — and paste it here.",
     ],
     link: { label: "Open Resend webhooks", href: "https://resend.com/webhooks" },

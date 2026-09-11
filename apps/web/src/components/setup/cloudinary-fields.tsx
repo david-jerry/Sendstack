@@ -7,7 +7,7 @@ import type { BrandingFormInput } from "@sendstack/shared";
 import { testCloudinary } from "@/actions/setup";
 import { Button } from "@/components/ui/button";
 import { Field, invalid } from "@/components/ui/form-field";
-import { Input } from "@/components/ui/input";
+import { Input, SecretInput } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Help } from "./help";
 import { TestResult } from "./shell";
@@ -116,14 +116,12 @@ export function CloudinaryFields({
           error={errors.cloudinaryApiKey}
           hint={initial.hasCredentials ? "Saved — leave blank to keep it." : undefined}
         >
-          <Input
+          <SecretInput
             {...apiKey}
             onChange={(event) => {
               void apiKey.onChange(event);
               mirror("apiKey")(event);
             }}
-            type="password"
-            autoComplete="off"
             placeholder={initial.hasCredentials ? "•••••••• (saved)" : ""}
           />
         </Field>
@@ -133,14 +131,12 @@ export function CloudinaryFields({
           error={errors.cloudinaryApiSecret}
           hint={initial.hasCredentials ? "Saved — leave blank to keep it." : undefined}
         >
-          <Input
+          <SecretInput
             {...apiSecret}
             onChange={(event) => {
               void apiSecret.onChange(event);
               mirror("apiSecret")(event);
             }}
-            type="password"
-            autoComplete="off"
             placeholder={initial.hasCredentials ? "•••••••• (saved)" : ""}
           />
         </Field>

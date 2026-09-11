@@ -74,12 +74,12 @@ the test that will enforce it.
 | Context | Owns | Aggregate and its invariants | Proving tests |
 |---|---|---|---|
 | **Identity & Access** | `packages/auth`; `apps/web/src/app/api/auth/[...all]/route.ts`; `actions/profile.ts`, `actions/push.ts`; the auth half of `actions/settings.ts` | *AuthPolicy* — at least one sign-in method enabled; one send gate, `assertCanSend`, on every send-capable surface; refusals recorded in `policy_decisions` | `auth-schema.test.ts`, `policy.test.ts`, `policy-gate.integration.test.ts` |
-| **Contact & Audience** | `actions/contacts.ts`, `actions/templates.ts`; `api/contacts`, `api/templates/preview`; `lib/queries/audience.ts`; the audience half of `packages/db/src/schema` | *Contact, List, Group* — addresses normalised at ingestion; one row per address; slugs unique by index, not by lookup | `contacts.slug.integration.test.ts`, `queries.integration.test.ts` |
-| **Suppression & Deliverability** | `packages/db/src/suppression.ts`; `lib/queries/suppressions.ts`; `actions/suppressions.ts`; `api/unsubscribe`; `packages/config/src/deliverability.ts` | *Suppression* — checked on every send path through `isUnsendable`; bounces and complaints irreversible; soft-bounce counter increments and tests in one statement | `suppressions.integration.test.ts`, `campaigns.guards.integration.test.ts` |
+| **Contact & Audience** | `actions/contacts.ts`, `actions/templates.ts`; `api/contacts`, `api/templates/preview`; `lib/queries/audience.ts`; the audience half of `packages/db/src/schema` | *Contact, List, Group* — addresses normalised at ingestion; one row per address; slugs unique by index, not by lookup; a Resend `contact.*` webhook never writes to `contacts` — the cascade on `campaign_recipients.contact_id` means a mirrored delete would erase campaign history | `contacts.slug.integration.test.ts`, `queries.integration.test.ts` |
+| **Suppression & Deliverability** | `packages/db/src/suppression.ts`; `lib/queries/suppressions.ts`; `actions/suppressions.ts`; `api/unsubscribe`; `packages/config/src/deliverability.ts` | *Suppression* — checked on every send path through `isUnsendable`; bounces and complaints irreversible; soft-bounce counter increments and tests in one statement; Resend `suppression.added` is mirrored in (a `manual` origin suppresses without marking the contact bounced), `suppression.removed` never mirrored out | `suppressions.integration.test.ts`, `campaigns.guards.integration.test.ts` |
 | **Campaign Orchestration** | `actions/campaigns.ts`; `api/campaigns`; `packages/jobs/src/functions/queue-campaign.ts`, `scheduler.ts` | *Campaign* — legal transitions only, claimed with `UPDATE … WHERE status = … RETURNING`; materialised once; a cron tick and a manual send in the same minute produce one queue | `pipeline.duplicity.integration.test.ts`, `campaigns.guards.integration.test.ts` |
 | **Delivery Execution** | `packages/jobs/src/functions/send-campaign.ts`, `outbound-store.ts`, `delivery-sql.ts`; `packages/email/src/send.ts`; `actions/compose.ts`, `actions/thread.ts` (send halves); `api/compose/send`; `lib/queries/outbound.ts` | *CampaignRecipient, OutboundMessage* — one row per `client_key`; provider idempotency key per send; status **and** event ladders monotonic; `last_event` single-dialect under `outbound_last_event_bare` | `compose.replay.integration.test.ts`, `thread.reply-replay.integration.test.ts`, `reconcile.integration.test.ts`, `delivery-status.test.ts` |
 | **Inbound Processing** | `api/webhooks/resend`; `packages/jobs/src/functions/fetch-inbound.ts`, `inbound-store.ts`; `actions/inbox.ts`, `actions/attachments.ts`; `api/attachments/[id]`; `api/inbox/threads`; `lib/queries/thread.ts`, `inbox.ts` | *InboundMessage* — verified signature before any write; deduped by `email_events.provider_event_id` inside the same transaction as the effect; metadata first, body hydrated after; thread status written once, delta derived from the rows moved | `route.integration.test.ts`, `route.release.test.ts`, `thread-status.integration.test.ts`, `unread-count.integration.test.ts` |
-| **Realtime Projection** | `packages/redis`; `packages/shared/src/realtime.ts`; `api/realtime/stream`, `api/setup/stream`; `stores/realtime-store.ts`, `hooks/use-realtime.ts` | *Projection* — schema-validated on publish and consume; publishes the row's stored state, never the incoming event; every consumer tolerates duplicates; a fresh server render always reseeds | `realtime-store.test.ts`, `client.test.ts`, the publish assertions in `route.integration.test.ts` |
+| **Realtime Projection** | `packages/redis`; `packages/shared/src/realtime.ts`, `packages/shared/src/account-events.ts`; `api/realtime/stream`, `api/setup/stream`; `stores/realtime-store.ts`, `hooks/use-realtime.ts`; `lib/queries/activity.ts`, `components/shell/activity-bell.tsx` | *Projection* — schema-validated on publish and consume; publishes the row's stored state, never the incoming event; every consumer tolerates duplicates; a fresh server render always reseeds; the account feed is derived from `email_events` rather than stored, so a dropped event costs only freshness | `realtime-store.test.ts`, `client.test.ts`, `account-events.test.ts`, `activity.integration.test.ts`, the publish assertions in `route.integration.test.ts` |
 | **Configuration** | `packages/config`; `actions/setup.ts`; the non-auth half of `actions/settings.ts`; `api/branding/*`, `api/avatars/*`; `api/inngest` | *Settings, Secret* — database before environment; secrets encrypted at rest; one schema per form shared by wizard and Settings; cache invalidated on every write | `config.test.ts`, `sender-config.test.ts`, `settings-defaults.test.ts` |
 
 ### Integration rules
@@ -310,6 +310,22 @@ because the tag is our own row id and does not depend on having correctly paired
 a batch response to its inputs. The status `UPDATE` uses a `CASE` ladder so
 out-of-order events cannot move a recipient backwards: an open arriving after a
 bounce must not overwrite the bounce.
+
+**Three families, all nineteen event types.** `email.received` is inbound. The
+`email.*` delivery events move statuses — including `email.scheduled` and
+`email.suppressed`, which were stored and ignored until `scheduled` and
+`suppressed` joined `DELIVERY_EVENT_NAMES`; each failure kind also reports its
+reason under a different payload key (`bounce.message`, `failed.reason`,
+`suppressed.message`), and reading only the first left `error` null for the
+other two. The ten **account** events — `domain.*`, `contact.*`,
+`suppression.*` — go through `handleAccountEvent`, which describes them via
+`packages/shared/src/account-events.ts` and publishes `account.activity`.
+Exactly one of the ten writes: `suppression.added` is mirrored into
+`suppressions`, because every send path consults that table and not the
+provider's list. `suppression.removed` never deletes locally, and `contact.*`
+never touch `contacts` at all. A payload the describer cannot read is stored,
+logged and answered 200 — Resend has changed payload shapes before, and no
+number of retries fixes a shape.
 
 ---
 

@@ -702,7 +702,21 @@ function setUpNotifications({
          * should be one notification, so the tag is that thing.
          */
         ...(payload.tag ?? defaultTag ? { tag: payload.tag ?? defaultTag } : {}),
-        renotify: true,
+        /**
+         * Whether replacing an existing notification alerts again.
+         *
+         * `true` is the right default — a second thing happening under the
+         * same tag is a second thing to know about. It is wrong for the one
+         * case where a notification is deliberately sent twice to *improve*
+         * it: a sender publishing a placeholder and then the same
+         * notification with real content buzzes the device twice for one
+         * event, which is exactly the pattern people mute an app over. Such
+         * a sender passes `renotify: false` on the second push.
+         *
+         * Only meaningful alongside a tag; the spec requires one, and every
+         * caller here sets one.
+         */
+        renotify: payload.renotify ?? true,
         data: { url: payload.url ?? defaultUrl },
         timestamp: Date.now(),
       }),

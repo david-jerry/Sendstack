@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Bell, BellOff, Laptop, Send, ShieldCheck } from "lucide-react";
+import { Bell, BellOff, Laptop, Send, ShieldCheck, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   listPushDevices,
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { VapidKeys } from "@/components/settings/vapid-keys";
 import { usePush } from "@/hooks/use-push";
+import { playTestSound, setSoundEnabled, useSoundEnabled } from "@/lib/notification-sound";
 import { cn } from "@/lib/utils";
 
 function formatWhen(iso: string): string {
@@ -31,6 +32,16 @@ function formatWhen(iso: string): string {
 export function NotificationsSection({ appName }: { appName: string }) {
   const { state, endpoint, busy, error, enable, disable } = usePush();
   const [devices, setDevices] = useState<DeviceSubscription[] | null>(null);
+  /**
+   * Read through `useSyncExternalStore`, not `useState` seeded from storage.
+   *
+   * `localStorage` does not exist on the server, so an initialiser that read
+   * it would make the first client render disagree with the HTML; correcting
+   * that in an effect is a cascading render, which React's own lint rule
+   * rejects. The hook renders the documented default during SSR and
+   * hydration and switches only for a browser that has turned it off.
+   */
+  const sound = useSoundEnabled();
   const [pending, startAction] = useTransition();
   const [reload, setReload] = useState(0);
 
@@ -95,6 +106,53 @@ export function NotificationsSection({ appName }: { appName: string }) {
           }}
         />
       </div>
+
+      {/*
+        * Beside the push switch, not inside it. The two are independent:
+        * push is what reaches a phone in a pocket, the cue is what a person
+        * at the keyboard hears, and someone who has declined notifications
+        * may well still want the sound in the tab they are looking at.
+        */}
+      <div className="flex items-start justify-between gap-3 rounded-lg border p-3">
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium">Play a sound</p>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+            A short cue in this tab when mail arrives or a send fails. Stored per browser,
+            like the subscription above, and it needs one click on the page before a browser
+            will allow any audio at all.
+          </p>
+        </div>
+        <Switch
+          aria-label="Play a sound"
+          checked={sound}
+          onCheckedChange={setSoundEnabled}
+        />
+      </div>
+
+      {/*
+        * Not decoration — a diagnosis.
+        *
+        * A cue that does not play is invisible by design: the realtime
+        * handler's job is to render the message, so it swallows audio
+        * failures rather than letting a decoder take the inbox down. That
+        * left "no sound" with no way to tell a blocked autoplay from a
+        * muted OS from a broken file. This asks the browser directly and
+        * reports what it said.
+        */}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          void playTestSound().then((result) => {
+            if (result.ok) toast.success("Played. If you heard nothing, check the system volume.");
+            else toast.error(result.reason);
+          });
+        }}
+      >
+        <Volume2 className="size-3.5" />
+        Play a test sound
+      </Button>
 
       {error ? (
         <p className="rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-2 text-[12px] text-destructive">
@@ -188,9 +246,11 @@ export function NotificationsSection({ appName }: { appName: string }) {
         </p>
         <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
           One notification per inbound conversation, tagged by thread — so ten replies to
-          the same message replace each other rather than stacking ten alerts. Campaign
-          delivery events are not pushed; they belong on the campaign page, not a lock
-          screen.
+          the same message replace each other rather than stacking ten alerts. Also pushed:
+          a sending domain that changed or was removed, and an address Resend added to its
+          suppression list — each of those stops mail leaving, so the useful response is to
+          look now. Campaign delivery events are still not pushed; they belong on the
+          campaign page, not a lock screen.
         </p>
       </div>
     </div>

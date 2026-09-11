@@ -185,8 +185,15 @@ pnpm install
 pnpm dev
 ```
 
-Open <http://localhost:3000>. You will land on the setup wizard, which walks
+Open <http://localhost:3005>. You will land on the setup wizard, which walks
 through seven steps:
+
+> Port 3005, not 3000, because 3000 is the most contested port on a developer's
+> machine and `next dev` responds to a busy port by quietly moving to the next
+> free one — while the Cloudflare tunnel keeps forwarding to the port it
+> assumed, and serves whatever else is listening there. Override both halves
+> together with a shell variable, `PORT=3010 pnpm dev`; it is deliberately not
+> a `.env` key, because `next dev` does not read one.
 
 1. **Database** — paste a Postgres URL, press Test. It writes `.env.local` for
    you when it can, or hands you the values to paste into your host when it

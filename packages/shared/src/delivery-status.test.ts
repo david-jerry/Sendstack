@@ -263,3 +263,38 @@ describe("eventAdvances", () => {
     );
   });
 });
+
+/**
+ * `scheduled` and `suppressed` joined `DELIVERY_EVENT_NAMES` after the webhook
+ * route spent its first life storing them and acting on neither. Both already
+ * had a row in both maps, so nothing here is a new rule — these pin the four
+ * facts that made widening the array safe, so that a later edit to either map
+ * cannot quietly change what a scheduled campaign or a refused address does.
+ */
+describe("the events the webhook route used to drop", () => {
+  it("treats a schedule as pre-send progress, not as a send", () => {
+    expect(recipientStatusForEvent("email.scheduled")).toBe("sending");
+    expect(outboundStatusForEvent("email.scheduled")).toBe("queued");
+    expect(nextRecipientStatus("pending", "sending")).toBe("sending");
+  });
+
+  it("does not let a late schedule drag a sent reply backwards", () => {
+    // Resend's retry ladder runs for ten hours, so `email.scheduled` can land
+    // long after the message actually went out.
+    expect(nextOutboundStatus("sent", "queued")).toBe("sent");
+    expect(nextRecipientStatus("delivered", "sending")).toBe("delivered");
+  });
+
+  it("treats a suppressed address as a failure the sender must see", () => {
+    expect(recipientStatusForEvent("email.suppressed")).toBe("failed");
+    expect(outboundStatusForEvent("email.suppressed")).toBe("failed");
+    expect(eventAdvances("sent", "suppressed")).toBe(true);
+  });
+
+  it("keeps the first failure when a suppression follows a bounce", () => {
+    // Terminal pair: `error` is written first-wins, so the event that explains
+    // it must not be replaced either.
+    expect(eventAdvances("bounced", "suppressed")).toBe(false);
+    expect(eventAdvances("suppressed", "bounced")).toBe(false);
+  });
+});

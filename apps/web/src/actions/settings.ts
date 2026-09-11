@@ -16,7 +16,7 @@ import {
   type BrandingKind,
   type SecretKey,
 } from "@sendstack/config";
-import { resetResendClient } from "@sendstack/email";
+import { resetResendClient, verifyResendKey } from "@sendstack/email";
 import { resetRedisClient } from "@sendstack/redis";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -128,7 +128,29 @@ export async function updateEmailSettings(input: {
   }
   const { apiKey, domain, fromEmail, fromName, webhookSecret, ratePerSecond } = parsed.data;
 
-  if (apiKey?.trim()) await setSecret("resendApiKey", apiKey);
+  /**
+   * Verified against Resend before it is stored — the wizard's rule, which
+   * this writer did not have.
+   *
+   * The two paths write the same secret and only one of them asked whether
+   * the string was a key. A password manager filled this field with a
+   * database password, `setSecret` took it, and from that moment every
+   * authenticated read answered `400 API key is invalid` — Sync first, since
+   * it is the only one a person triggers by hand. Sending appeared fine for
+   * as long as the client cached from the previous key survived, which is
+   * what made the report read as "the same key that sends fails to sync".
+   *
+   * A round trip on save is the right price: it happens once per key change
+   * and it is the difference between failing here, with the field named, and
+   * failing later in a background job nobody is watching.
+   */
+  if (apiKey?.trim()) {
+    const verified = await verifyResendKey(apiKey);
+    if (!verified.ok) {
+      return { ok: false, error: `Resend rejected that API key — ${verified.error}` };
+    }
+    await setSecret("resendApiKey", apiKey);
+  }
   if (webhookSecret?.trim()) await setSecret("resendWebhookSecret", webhookSecret);
 
   // Collapse blank lines but keep the ones the operator typed: a postal
