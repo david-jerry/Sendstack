@@ -38,7 +38,7 @@ export type NormalizedInbound = {
 };
 
 /** Header lookup that ignores case, since providers do not agree on it. */
-function header(headers: Record<string, string> | null, name: string): string | null {
+function rawHeader(headers: Record<string, string> | null, name: string): string | null {
   if (!headers) return null;
   const target = name.toLowerCase();
   for (const [key, value] of Object.entries(headers)) {
@@ -47,13 +47,68 @@ function header(headers: Record<string, string> | null, name: string): string | 
   return null;
 }
 
-/** `References` is a whitespace-separated list of `<message-id>` tokens. */
-function parseReferences(raw: string | null): string[] {
+/**
+ * Every value of one header, whichever way Resend chose to encode it.
+ *
+ * **Resend serialises a header that appears more than once as a JSON array
+ * in a string.** One `References` comes back as
+ * `"<a@x>"`; two come back as the literal characters `["<a@x>","<b@y>"]`.
+ * The same is true of `Received`, which is always repeated.
+ *
+ * This is not a curiosity, it is the threading bug. `parseReferences` split
+ * on whitespace, per RFC 5322 — and the JSON form contains none, so the
+ * whole bracketed string survived as a single "message id" and became the
+ * conversation key. A first reply has one reference and threaded correctly;
+ * the *second* reply onwards had two and was filed under a key no other
+ * message could ever share. So a conversation silently split in two exactly
+ * when it started being a conversation, which is the point at which
+ * threading is the only thing keeping an inbox readable.
+ *
+ * Both encodings are accepted rather than one being declared correct: the
+ * RFC form is what every other provider sends and what Resend itself sends
+ * for a single value, and an implementation that handled only the array
+ * would break the common case to fix the rarer one.
+ */
+function headerValues(headers: Record<string, string> | null, name: string): string[] {
+  const raw = rawHeader(headers, name);
   if (!raw) return [];
-  return raw
+
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        // Each element may itself be a whitespace-separated list — a folded
+        // `References` header that was also repeated.
+        return parsed.flatMap((value) => (typeof value === "string" ? tokens(value) : []));
+      }
+    } catch {
+      // Not JSON after all. A header value may legitimately begin with `[`
+      // — a subject-style token, or a malformed id — so this falls through
+      // to the RFC reading rather than discarding the value.
+    }
+  }
+
+  return tokens(trimmed);
+}
+
+/** `<a@x> <b@y>` → `["<a@x>", "<b@y>"]`. RFC 5322's form. */
+function tokens(value: string): string[] {
+  return value
     .split(/\s+/)
     .map((token) => token.trim())
     .filter((token) => token.length > 0);
+}
+
+/**
+ * A header with one meaningful value — `Message-ID`, `In-Reply-To`.
+ *
+ * Takes the first if the provider repeated it. Repeating either is
+ * malformed, but "pick one deterministically" beats threading a message
+ * under `["<a>","<b>"]`.
+ */
+function header(headers: Record<string, string> | null, name: string): string | null {
+  return headerValues(headers, name)[0] ?? null;
 }
 
 /**
@@ -91,7 +146,7 @@ export async function fetchInboundEmail(providerEmailId: string): Promise<Normal
   const from = parseAddress(email.from);
   const headers = email.headers ?? null;
   const inReplyTo = header(headers, "in-reply-to");
-  const references = parseReferences(header(headers, "references"));
+  const references = headerValues(headers, "references");
   const messageId = email.message_id ?? header(headers, "message-id");
 
   return {
