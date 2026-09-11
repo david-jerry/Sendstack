@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { parseRealtimeEvent, type RealtimeEventType } from "@sendstack/shared";
 import { REALTIME_INVALIDATIONS } from "@/lib/query-keys";
-import { armSound, playEventSound } from "@/lib/notification-sound";
+import { playEventSound } from "@/lib/notification-sound";
 import { useRealtimeStore } from "@/stores/realtime-store";
 
 /**
@@ -73,14 +73,6 @@ export function useRealtime(options?: { initialUnread?: number }) {
   });
 
   useEffect(() => {
-    /**
-     * Audio has to wait for a gesture; the listener that notices one is
-     * armed here because this hook is mounted exactly once, in the shell.
-     * Arming it inside the sound module's own first call would be too late
-     * — the first event is precisely the one that would be silent.
-     */
-    armSound();
-
     const source = new EventSource("/api/realtime/stream");
 
     /**

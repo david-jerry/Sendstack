@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Bell, BellOff, Laptop, Send, ShieldCheck } from "lucide-react";
+import { Bell, BellOff, Laptop, Send, ShieldCheck, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   listPushDevices,
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { VapidKeys } from "@/components/settings/vapid-keys";
 import { usePush } from "@/hooks/use-push";
-import { setSoundEnabled, useSoundEnabled } from "@/lib/notification-sound";
+import { playTestSound, setSoundEnabled, useSoundEnabled } from "@/lib/notification-sound";
 import { cn } from "@/lib/utils";
 
 function formatWhen(iso: string): string {
@@ -128,6 +128,31 @@ export function NotificationsSection({ appName }: { appName: string }) {
           onCheckedChange={setSoundEnabled}
         />
       </div>
+
+      {/*
+        * Not decoration — a diagnosis.
+        *
+        * A cue that does not play is invisible by design: the realtime
+        * handler's job is to render the message, so it swallows audio
+        * failures rather than letting a decoder take the inbox down. That
+        * left "no sound" with no way to tell a blocked autoplay from a
+        * muted OS from a broken file. This asks the browser directly and
+        * reports what it said.
+        */}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          void playTestSound().then((result) => {
+            if (result.ok) toast.success("Played. If you heard nothing, check the system volume.");
+            else toast.error(result.reason);
+          });
+        }}
+      >
+        <Volume2 className="size-3.5" />
+        Play a test sound
+      </Button>
 
       {error ? (
         <p className="rounded-md border border-destructive/40 bg-destructive/8 px-2.5 py-2 text-[12px] text-destructive">

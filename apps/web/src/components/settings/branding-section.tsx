@@ -1,10 +1,9 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ImageUp, Trash2 } from "lucide-react";
-import { toast } from "sonner";
 import { DEFAULT_BRAND_COLOR, brandingFormSchema, isHexColor, type BrandingFormInput } from "@sendstack/shared";
 import { updateBranding } from "@/actions/settings";
 import { Button } from "@/components/ui/button";
@@ -13,17 +12,26 @@ import { Input } from "@/components/ui/input";
 import { NameInput } from "@/components/ui/name-input";
 import { CloudinaryFields } from "@/components/setup/cloudinary-fields";
 import { Help } from "@/components/setup/help";
+import { SaveState, useSectionAutosave } from "@/components/settings/autosave";
 
 function AssetPicker({
   name,
   currentUrl,
   accept,
   hint,
+  onChanged,
 }: {
   name: "logo" | "favicon";
   currentUrl: string | null;
   accept: string;
   hint: string;
+  /**
+   * Picking or removing an image commits immediately rather than waiting
+   * for a debounce. There is no half-chosen file, and an image that
+   * visibly changed while the stored one did not is the kind of thing
+   * somebody discovers in a campaign a week later.
+   */
+  onChanged: () => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -52,6 +60,7 @@ function AssetPicker({
             if (file) {
               setPreview(URL.createObjectURL(file));
               setRemoved(false);
+              onChanged();
             }
           }}
         />
@@ -69,6 +78,7 @@ function AssetPicker({
                 setPreview(null);
                 if (input.current) input.current.value = "";
                 setRemoved(true);
+                onChanged();
               }}
             >
               <Trash2 className="size-3" />
@@ -94,14 +104,32 @@ export function BrandingSection({
     cloudinary: { cloudName: string; folder: string; hasCredentials: boolean };
   };
 }) {
-  const [pending, start] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
+  /**
+   * Bumped per edit so each scheduled save is a distinct value.
+   *
+   * The payload is read out of the form at save time rather than carried
+   * here — a `FormData` built per keystroke would clone any staged image
+   * with it, and the whole point of the debounce is that most of those
+   * snapshots are thrown away.
+   */
+  const tick = useRef(0);
+
+  const autosave = useSectionAutosave(async () => {
+    const element = formRef.current;
+    // Unmounted mid-edit: `useAutosave` deliberately runs the queued save
+    // on the way out, and there is no form left to read.
+    if (!element) return { ok: true };
+    return updateBranding(new FormData(element));
+  });
+
+  const edit = () => autosave.change(++tick.current);
+  const commit = () => autosave.saveNow(++tick.current);
 
   // The same schema the wizard uses, so the two screens cannot disagree about
   // what a valid workspace name or app URL is.
   const {
     register,
-    handleSubmit,
     watch,
     setValue,
     formState: { errors },
@@ -121,18 +149,25 @@ export function BrandingSection({
 
   const color = watch("primaryColor");
 
-  const onSubmit = handleSubmit(() => {
-    const element = formRef.current;
-    if (!element) return;
-    start(async () => {
-      const result = await updateBranding(new FormData(element));
-      if (result.ok) toast.success("Branding saved");
-      else toast.error(result.error);
-    });
-  });
-
   return (
-    <form ref={formRef} onSubmit={onSubmit} noValidate className="space-y-4">
+    <form
+      ref={formRef}
+      /**
+       * One pair of handlers on the form rather than composed onto each
+       * `register()`. React events bubble, so this catches every input in
+       * the section — including `CloudinaryFields`, which this component
+       * does not own — and cannot be forgotten when a field is added.
+       */
+      onChange={edit}
+      onBlur={autosave.flush}
+      onSubmit={(event) => {
+        // Nothing to submit; Enter in a text field must not reload the page.
+        event.preventDefault();
+        autosave.flush();
+      }}
+      noValidate
+      className="space-y-4"
+    >
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Workspace name"
@@ -170,7 +205,12 @@ export function BrandingSection({
 
       <Field label="Logo" help={<Help topic="logo" />}>
         <AssetPicker
+          // Remounted on every successful save, which clears the staged
+          // file. Without it the same image is re-uploaded on each
+          // subsequent autosave for as long as the page stays open.
+          key={`logo-${autosave.savedAt}`}
           name="logo"
+          onChanged={commit}
           currentUrl={initial.logoUrl}
           accept="image/png,image/jpeg,image/webp,image/svg+xml"
           hint="Appears at the top of every campaign. PNG, JPEG, WebP or SVG up to 512KB."
@@ -179,16 +219,16 @@ export function BrandingSection({
 
       <Field label="Favicon" help={<Help topic="favicon" />}>
         <AssetPicker
+          key={`favicon-${autosave.savedAt}`}
           name="favicon"
+          onChanged={commit}
           currentUrl={initial.faviconUrl}
           accept="image/png,image/x-icon,image/svg+xml"
           hint="The browser tab icon. PNG, ICO or SVG up to 512KB."
         />
       </Field>
 
-      <Button type="submit" disabled={pending}>
-        {pending ? "Saving…" : "Save branding"}
-      </Button>
+      <SaveState status={autosave.status} error={autosave.error} savedAt={autosave.savedAt} />
     </form>
   );
 }
