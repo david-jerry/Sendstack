@@ -118,3 +118,55 @@ describe("MessageCard header", () => {
     expect(screen.getByText("Analytical engine")).toBeInTheDocument();
   });
 });
+
+/**
+ * A stub that is waiting, versus one that has given up.
+ *
+ * `content_fetched_at IS NULL` is equally true a second after a message
+ * arrives and a week later, and the card used to render the same "Fetching
+ * the message…" for both. A spinner that never resolves is worse than an
+ * error: it tells the reader to keep waiting, so nobody goes looking for the
+ * cause — which, when this was found, was a Resend key that rejected every
+ * call, leaving the body missing *and* the message filed in a conversation
+ * of its own because the threading headers arrive with it.
+ */
+describe("a message whose body never arrived", () => {
+  const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000);
+
+  it("says it is fetching while the fetch is plausibly still running", () => {
+    renderCard({ contentFetchedAt: null, at: minutesAgo(1), text: null, html: null });
+
+    expect(screen.getByText(/Fetching the message/i)).toBeTruthy();
+    expect(screen.queryByText(/never fetched/i)).toBeNull();
+  });
+
+  it("stops claiming to fetch once the fetch has clearly failed", () => {
+    renderCard({ contentFetchedAt: null, at: minutesAgo(90), text: null, html: null });
+
+    expect(screen.queryByText(/Fetching the message/i)).toBeNull();
+    expect(screen.getByText(/never fetched/i)).toBeTruthy();
+  });
+
+  it("names Sync, which is what repairs it", () => {
+    // The reader cannot be expected to know that the button above the inbox
+    // list re-runs a failed body fetch.
+    renderCard({ contentFetchedAt: null, at: minutesAgo(90), text: null, html: null });
+
+    expect(screen.getByText(/Sync/)).toBeTruthy();
+  });
+
+  it("explains the threading consequence, not just the missing body", () => {
+    // The body and the References headers arrive in the same fetch, so a
+    // stalled stub is also why a reply sits in a conversation of its own.
+    renderCard({ contentFetchedAt: null, at: minutesAgo(90), text: null, html: null });
+
+    expect(screen.getByText(/conversation/i)).toBeTruthy();
+  });
+
+  it("renders the body normally once it is there", () => {
+    renderCard({ contentFetchedAt: new Date(), at: minutesAgo(90), text: "Hello" });
+
+    expect(screen.queryByText(/never fetched/i)).toBeNull();
+    expect(screen.queryByText(/Fetching the message/i)).toBeNull();
+  });
+});

@@ -8,6 +8,8 @@ import { ThreadRowActions } from "./thread-row-actions"
 import { Avatar } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
 import { useRealtimeStore } from "@/stores/realtime-store"
+import { useHydrated } from "@/hooks/use-hydrated"
+import { BODY_STATE_LABEL, inboundBodyStateNow } from "@/lib/inbound-body"
 import type { InboxThread } from "@/lib/queries/inbox"
 import { RelativeTime } from "@/components/ui/time";
 
@@ -23,6 +25,19 @@ export function ThreadList({
 	const searchParams = useSearchParams()
 	const freshIds = useRealtimeStore((s) => s.freshEmailIds)
 	const query = searchParams.toString()
+
+	/**
+	 * Read once per render, after hydration.
+	 *
+	 * `useHydrated` is what keeps "three minutes ago" out of the server pass:
+	 * the server and the browser evaluate it at different instants, and React
+	 * requires the first client render to match the HTML exactly. Before
+	 * hydration every unfetched row reads "Fetching message…", which is the
+	 * neutral of the two and correct for the row that just arrived.
+	 */
+	const hydrated = useHydrated()
+	const bodyState = (thread: InboxThread) =>
+		hydrated ? inboundBodyStateNow(thread) : "fetching"
 
 	if (threads.length === 0) {
 		return (
@@ -140,14 +155,22 @@ export function ThreadList({
 									{thread.hasAttachments ? (
 										<Paperclip className="size-3 shrink-0 text-muted-foreground" />
 									) : null}
-									<p className="truncate text-[12px] text-muted-foreground/80">
+									<p
+										className={cn(
+											"truncate text-[12px] text-muted-foreground/80",
+											bodyState(thread) === "stalled" && "text-signal-warning",
+										)}
+									>
 										{/* An empty snippet is not an empty email — it is a message
-                        whose body has not been fetched from Resend yet. Saying
-                        so beats showing a blank row. */}
+                        whose body has not been fetched from Resend yet. Which
+                        of the two things that means depends on how long it
+                        has been waiting; see `inbound-body.ts`. */}
 										{thread.snippet ??
 											(thread.contentFetchedAt
 												? ""
-												: "Fetching message…")}
+												: BODY_STATE_LABEL[
+														bodyState(thread) as "fetching" | "stalled"
+												  ])}
 									</p>
 								</div>
 							</div>

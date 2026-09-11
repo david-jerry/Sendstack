@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { MessageBody } from "@/components/mail/message-body";
 import { useOutboundEvent } from "@/stores/realtime-store";
+import { useHydrated } from "@/hooks/use-hydrated";
+import { inboundBodyStateNow } from "@/lib/inbound-body";
 import { RelativeTime } from "@/components/ui/time";
 
 /**
@@ -61,7 +63,25 @@ export function MessageCard({
 
   // A designed email is shown as designed; a plain-text one becomes a bubble.
   const rich = Boolean(item.html?.trim());
-  const fetching = item.kind === "received" && item.contentFetchedAt === null;
+  /**
+   * Not a boolean any more: a stub that has been waiting for hours is not
+   * fetching, and saying it is sends the reader back to waiting instead of
+   * to the Sync button that repairs it. See `inbound-body.ts`.
+   *
+   * `useHydrated` keeps the clock out of the server pass — the server and
+   * the browser evaluate "three minutes ago" at different instants, and the
+   * first client render has to match the HTML.
+   */
+  const hydrated = useHydrated();
+  const bodyState =
+    item.kind === "received"
+      ? hydrated
+        // `at` is this row's `received_at`; the thread reader flattens
+        // inbound and outbound onto one name for the timestamp.
+        ? inboundBodyStateNow({ contentFetchedAt: item.contentFetchedAt, receivedAt: item.at })
+        : ("fetching" as const)
+      : ("ready" as const);
+  const fetching = bodyState !== "ready";
 
   /**
    * Who sent this, from whatever the row actually holds.
@@ -164,7 +184,20 @@ export function MessageCard({
             because that is what reads like a conversation. */}
         {fetching ? (
           <Bubble outgoing={outgoing} failed={failed}>
-            <span className="text-[12px] italic opacity-70">Fetching the message…</span>
+            {bodyState === "stalled" ? (
+              <span className="text-[12px]">
+                <span className="font-medium">This message was never fetched.</span>{" "}
+                {/* The body and the threading headers arrive together, so a
+                    stalled fetch is also why a reply can be sitting in a
+                    conversation of its own. Both are repaired by the same
+                    button, so both are named. */}
+                Resend has the body but this instance could not retrieve it — press{" "}
+                <span className="font-medium">Sync</span> above the inbox list to try again. Until
+                it succeeds the message cannot be grouped into its conversation either.
+              </span>
+            ) : (
+              <span className="text-[12px] italic opacity-70">Fetching the message…</span>
+            )}
           </Bubble>
         ) : rich ? (
           <MessageBody html={item.html} text={item.text} className="w-full" />
