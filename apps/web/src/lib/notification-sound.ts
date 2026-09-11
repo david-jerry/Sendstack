@@ -175,60 +175,115 @@ function player(name: SoundName): HTMLAudioElement | null {
   return audio;
 }
 
-/**
- * True once the reader has interacted with the page.
- *
- * Every browser blocks scripted audio until then, and the rejection it
- * raises is indistinguishable from a real failure. Tracking the gesture
- * ourselves means a blocked cue is *not attempted* rather than attempted and
- * swallowed, which keeps the console clean and makes a genuine decode error
- * visible when one happens.
- */
-let unlocked = false;
+export type PlayResult = { ok: true } | { ok: false; reason: string };
 
-/**
- * Starts listening for the first gesture. Idempotent; safe to call per mount.
- *
- * `once: true` on each listener, and a shared handler that removes the
- * others: whichever gesture comes first wins and nothing stays attached.
- */
-export function armSound(): void {
-  if (unlocked || typeof window === "undefined") return;
-
-  const events = ["pointerdown", "keydown", "touchstart"] as const;
-  const unlock = () => {
-    unlocked = true;
-    for (const name of events) window.removeEventListener(name, unlock);
-  };
-  for (const name of events) window.addEventListener(name, unlock, { once: true, passive: true });
+/** One string property off an unknown throw, or `""`. */
+function field(error: unknown, key: "name" | "message"): string {
+  if (typeof error !== "object" || error === null) return "";
+  const value = (error as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
 }
 
 /**
- * Play the cue for an event, if there is one and the reader wants it.
+ * Why a cue did not play, in words the person reading a toast can act on.
  *
- * Silent about its own failures on purpose — see the note at the top of the
- * file. The `catch` on `play()` is not decoration: it rejects routinely, for
- * a tab that is not visible, an OS-level mute, or a gesture that turned out
- * not to count.
+ * `NotAllowedError` is the common one and the only one that is not a fault:
+ * every browser blocks scripted audio until the page has been interacted
+ * with, and it is worth saying so rather than reporting a failure.
+ *
+ * The cause is read off the object rather than through `instanceof Error`.
+ * `play()` rejects with a `DOMException`, which is only sometimes an `Error`
+ * subclass — it is in browsers, it is not in jsdom — and a rejection is not
+ * obliged to be either. An `instanceof` test collapsed every distinct cause
+ * into "The sound could not be played", which is the generic sentence this
+ * function exists to avoid.
+ */
+function describeFailure(error: unknown): string {
+  switch (field(error, "name")) {
+    case "NotAllowedError":
+      return "The browser blocked it. Audio needs one click on the page first — click anywhere and try again.";
+    case "NotSupportedError":
+      return "The browser could not load or decode the sound file.";
+    case "AbortError":
+      return "Playback was interrupted before it started.";
+    default:
+      return field(error, "message") || "The sound could not be played.";
+  }
+}
+
+/**
+ * Play one cue, reporting what happened.
+ *
+ * **There is deliberately no "has the user gestured yet?" gate here.** There
+ * was one, and it is what made the cue silent while push notifications were
+ * arriving perfectly: it tracked `pointerdown`/`keydown`/`touchstart` on
+ * `window` and refused to even attempt playback until it had seen one, so
+ * any interaction it failed to observe — a click that never reached
+ * `window`, a listener attached after the only click, a second copy of this
+ * module in another chunk holding its own `false` — became permanent
+ * silence with nothing logged. The gate existed to keep the console clean
+ * and it cost the ability to find out why nothing played.
+ *
+ * The browser already knows the answer and gives it as a rejected promise.
+ * Attempting the play and reporting the rejection is both simpler and the
+ * thing that can be put in front of a person.
+ */
+export async function playCue(cue: Cue): Promise<PlayResult> {
+  const audio = player(cue.sound);
+  if (!audio) return { ok: false, reason: "This browser cannot play audio." };
+
+  try {
+    /**
+     * Its own `try`, before anything that matters.
+     *
+     * Rewinding an element that has not loaded a resource yet throws in
+     * some browsers, and it is the *first* thing a first-ever cue does — so
+     * an exception here used to take the `play()` call down with it inside
+     * a shared `try`, and the one cue most likely to hit it was the first
+     * of the session. A cue that cannot rewind should still play.
+     */
+    try {
+      audio.currentTime = 0;
+    } catch {
+      // No resource loaded yet; it starts from the beginning regardless.
+    }
+
+    audio.playbackRate = cue.rate;
+    audio.volume = cue.volume;
+    await audio.play();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: describeFailure(error) };
+  }
+}
+
+/**
+ * Play the cue for an event, if there is one and this browser wants it.
+ *
+ * Fire and forget: the caller is the realtime handler, whose real job is to
+ * render the message, and no audio decoder may fail that. The reason is
+ * logged in development only — in production a blocked cue is ordinary, and
+ * a console full of it teaches people to ignore the console.
  */
 export function playEventSound(event: RealtimeEvent): void {
-  if (!unlocked) return;
-
   const cue = cueFor(event);
   if (!cue) return;
   if (!soundEnabled()) return;
 
-  const audio = player(cue.sound);
-  if (!audio) return;
+  void playCue(cue).then((result) => {
+    if (!result.ok && process.env.NODE_ENV !== "production") {
+      console.warn(`[sound] ${event.type} cue did not play — ${result.reason}`);
+    }
+  });
+}
 
-  try {
-    audio.pause();
-    audio.currentTime = 0;
-    audio.playbackRate = cue.rate;
-    audio.volume = cue.volume;
-    void audio.play().catch(() => {});
-  } catch {
-    // Same policy: a cue is never worth an exception reaching a caller whose
-    // real job was to render the message.
-  }
+/**
+ * The cue for arriving mail, played on request. Wired to the Settings button.
+ *
+ * Ignores the preference deliberately: someone pressing "Play a test sound"
+ * is asking to hear it, and refusing silently because the switch beside it
+ * is off would be the same invisible failure this file was rewritten to end.
+ */
+export function playTestSound(): Promise<PlayResult> {
+  return playCue(ARRIVAL);
 }

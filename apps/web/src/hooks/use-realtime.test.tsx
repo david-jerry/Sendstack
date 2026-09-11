@@ -25,7 +25,6 @@ const playEventSound = vi.fn();
 vi.mock("sonner", () => ({ toast: (...args: unknown[]) => toast(...args) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
 vi.mock("@/lib/notification-sound", () => ({
-  armSound: vi.fn(),
   playEventSound: (...args: unknown[]) => playEventSound(...args),
 }));
 
