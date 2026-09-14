@@ -230,7 +230,25 @@ export default async function Home() {
 		getSession(),
 		getConfigCached(),
 	])
-	if (session) redirect("/inbox")
+
+	/**
+	 * Two reasons to never show this page, checked before a single element is
+	 * built: the visitor is already signed in, or the operator has turned the
+	 * landing page off in Settings.
+	 *
+	 * `redirect()` here rather than in middleware because the flag lives in
+	 * Postgres and middleware runs on the edge runtime, where there is no
+	 * connection to read it from — the same constraint that keeps the setup
+	 * and session gates in `setup-gate.ts` out of middleware. Thrown from the
+	 * top of the component, so the markup below is never rendered and nothing
+	 * of it reaches the browser.
+	 *
+	 * Anonymous visitors land on `/inbox`, which `requireAccess()` bounces to
+	 * `/sign-in`. One target for both cases: "the app starts at the inbox" is
+	 * a rule that stays true, and where an anonymous visitor gets sent from
+	 * there is the sign-in gate's decision to make, not this page's.
+	 */
+	if (session || config.homeRedirect) redirect("/inbox")
 
 	const description = tagline(config.appName)
 	const initial = config.appName.slice(0, 1).toUpperCase()

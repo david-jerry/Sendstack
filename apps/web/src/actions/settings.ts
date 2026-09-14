@@ -249,6 +249,27 @@ export async function updateAuthSettings(input: {
   return { ok: true };
 }
 
+/**
+ * Turn the public landing page on or off.
+ *
+ * Its own action rather than a field on `updateBranding`, because that form is
+ * validated by `brandingFormSchema` — which the setup wizard shares. Adding a
+ * key there would put a toggle in front of someone who has not finished
+ * installing yet, for a page they have never seen.
+ *
+ * `revalidatePath("/", "layout")` rather than `"/settings"`: the value decides
+ * what `/`, `robots.txt` and `sitemap.xml` answer, and all three are cached
+ * route output that would otherwise keep serving the previous decision.
+ */
+export async function updateHomeRedirect(enabled: boolean): Promise<Result> {
+  await requireSession();
+  // A Server Action is a public endpoint and the column is `not null`; an
+  // `undefined` from a hand-rolled call would otherwise reach Postgres.
+  await updateSettings({ homeRedirect: enabled === true });
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
 /** Explicit erasure, so a blank field never destroys a stored credential. */
 export async function forgetSecret(key: SecretKey): Promise<Result> {
   await requireSession();
