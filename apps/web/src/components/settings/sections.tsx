@@ -7,6 +7,7 @@ import type { Provenance } from "@sendstack/config";
 import {
   updateAuthSettings,
   updateEmailSettings,
+  updateHomeRedirect,
   updateJobSettings,
   updateRealtimeSettings,
 } from "@/actions/settings";
@@ -415,6 +416,51 @@ export function JobsSection({
       </FieldRow>
 
       <CopyBox label="Inngest endpoint — point your app here" value={inngestUrl} />
+
+      <SaveState status={autosave.status} error={autosave.error} savedAt={autosave.savedAt} />
+    </div>
+  );
+}
+
+/**
+ * The one switch that decides whether this instance has a public front page.
+ *
+ * Separate from `BrandingSection` even though it sits in the same tab: that
+ * section is a debounced form sharing `brandingFormSchema` with the setup
+ * wizard, and a switch has no half-typed state to debounce. It commits on
+ * press, for the reason `AuthSection` gives — a switch that has visibly moved
+ * while the setting behind it has not is a lie about what the front door does.
+ */
+export function LandingPageSection({ initial }: { initial: boolean }) {
+  const [enabled, setEnabled] = useState(initial);
+
+  const autosave = useSectionAutosave(async (value: boolean) => {
+    const result = await updateHomeRedirect(value);
+    // Back to the server's last accepted answer on refusal, not to a diff.
+    if (!result.ok) setEnabled(initial);
+    return result;
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3 rounded-lg border p-3">
+        <div className="min-w-0 flex-1">
+          <span className="text-[13px] font-medium">Skip the landing page</span>
+          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+            Send everyone who opens your app URL straight to the inbox — signed out, that is
+            the sign-in form. The landing page is never shown, and search engines are told not
+            to index it.
+          </p>
+        </div>
+        <Switch
+          checked={enabled}
+          onCheckedChange={(value) => {
+            setEnabled(value);
+            autosave.saveNow(value);
+          }}
+          aria-label="Skip the landing page"
+        />
+      </div>
 
       <SaveState status={autosave.status} error={autosave.error} savedAt={autosave.savedAt} />
     </div>

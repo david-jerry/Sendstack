@@ -11,6 +11,7 @@ function fallbackOrigin() {
 export default async function robots(): Promise<MetadataRoute.Robots> {
     let origin = fallbackOrigin();
     let configured = false;
+    let landingPage = false;
 
     try {
         const state = await getSetupState();
@@ -18,20 +19,26 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
             configured = true;
             const config = await getConfig();
             origin = parseSiteUrl(config.appUrl)?.origin ?? origin;
+            landingPage = !config.homeRedirect;
         }
     } catch {
         // Setup might be incomplete; default to env/local origin.
     }
 
     /**
-     * An unconfigured instance has nothing to index.
+     * Two instances have nothing to index.
      *
-     * Every route on it either redirects to the wizard or *is* the wizard, and
-     * the wizard is a form that configures the whole application. Inviting a
-     * crawler in while that is true would put a half-built instance in search
-     * results under a hostname that is about to change.
+     * **Unconfigured**: every route either redirects to the wizard or *is* the
+     * wizard, and the wizard is a form that configures the whole application.
+     * Inviting a crawler in while that is true would put a half-built instance
+     * in search results under a hostname that is about to change.
+     *
+     * **Landing page switched off**: `/` answers with a redirect to a sign-in
+     * form, and every other route is already disallowed below. `sitemap.ts`
+     * returns nothing on the same condition — a sitemap advertising a URL that
+     * only ever redirects is the failure mode of letting the two disagree.
      */
-    if (!configured) {
+    if (!configured || !landingPage) {
         return { rules: { userAgent: "*", disallow: "/" }, host: origin };
     }
 

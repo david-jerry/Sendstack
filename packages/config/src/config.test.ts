@@ -148,6 +148,34 @@ describe("getConfig resolution", () => {
   });
 });
 
+/**
+ * `homeRedirect` has no environment seed and no `resolve()` call — it is a
+ * plain boolean read straight off the row. What is worth a test is the
+ * default: an instance that upgrades into this column must keep the landing
+ * page it already had, and an instance with no row at all must not be told
+ * to redirect to an inbox that does not exist yet.
+ */
+describe("homeRedirect", () => {
+  it("defaults to off when no settings row exists", async () => {
+    const config = await getConfig({ fresh: true });
+    expect(config.homeRedirect).toBe(false);
+  });
+
+  it("defaults to off for a row written before the column existed", async () => {
+    store.settings = { appName: "Acme Mail" };
+
+    const config = await getConfig({ fresh: true });
+    expect(config.homeRedirect).toBe(false);
+  });
+
+  it("reads the stored value when it is on", async () => {
+    store.settings = { homeRedirect: true };
+
+    const config = await getConfig({ fresh: true });
+    expect(config.homeRedirect).toBe(true);
+  });
+});
+
 describe("clearSecret", () => {
   it("writes a tombstone rather than deleting the row", async () => {
     await clearSecret("resendApiKey");

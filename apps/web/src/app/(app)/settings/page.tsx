@@ -9,6 +9,7 @@ import {
   AuthSection,
   EmailSection,
   JobsSection,
+  LandingPageSection,
   RealtimeSection,
 } from "@/components/settings/sections";
 import {
@@ -115,6 +116,13 @@ export default async function SettingsPage({
                 },
               }}
             />
+          </Section>
+
+          <Section
+            title="Landing page"
+            description="What someone sees at your app URL before they sign in. The landing page describes the product and is the only page search engines are shown; turn it off on an instance that is only ever used by the people who already work here."
+          >
+            <LandingPageSection initial={config.homeRedirect} />
           </Section>
 
           <Section

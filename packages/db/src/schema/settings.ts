@@ -87,6 +87,17 @@ export const appSettings = pgTable("app_settings", {
   authMagicLink: boolean("auth_magic_link").notNull().default(false),
   allowSignup: boolean("allow_signup").notNull().default(false),
 
+  /**
+   * Whether `/` skips the public landing page and goes straight to the inbox.
+   *
+   * Off by default, and deliberately: the landing page is the instance's only
+   * indexable public URL, and flipping an existing install's front door to a
+   * redirect on deploy would drop it out of search results without anyone
+   * asking for that. A self-hosted instance with no interest in being
+   * discovered turns it on and gets an app that starts at the sign-in form.
+   */
+  homeRedirect: boolean("home_redirect").notNull().default(false),
+
   // ── Setup lifecycle ───────────────────────────────────────────────────────
   setupStep: text("setup_step").notNull().default("branding"),
   setupCompletedAt: timestamp("setup_completed_at", { withTimezone: true }),

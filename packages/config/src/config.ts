@@ -58,6 +58,16 @@ export type AppConfig = {
     allowSignup: boolean;
   };
 
+  /**
+   * Whether `/` redirects to the inbox instead of rendering the landing page.
+   *
+   * Part of `AppConfig` rather than read from the row at the one call site,
+   * because three surfaces have to agree about it — the home route, `robots`
+   * and `sitemap`. A sitemap advertising a URL that only ever answers with a
+   * redirect is the failure mode of letting them disagree.
+   */
+  homeRedirect: boolean;
+
   setup: { step: string; completedAt: Date | null };
 
   /** Where each value came from, for the Settings UI. */
@@ -254,6 +264,10 @@ export async function getConfig(options?: { fresh?: boolean }): Promise<AppConfi
       allowSignup: row?.allowSignup ?? false,
     },
 
+    // No settings row yet means an instance mid-setup, which has no landing
+    // page worth skipping — the wizard redirect in `/` fires first anyway.
+    homeRedirect: row?.homeRedirect ?? false,
+
     setup: {
       step: row?.setupStep ?? "branding",
       completedAt: row?.setupCompletedAt ?? null,
@@ -290,6 +304,7 @@ export type SettingsPatch = Partial<{
   authPasskey: boolean;
   authMagicLink: boolean;
   allowSignup: boolean;
+  homeRedirect: boolean;
   setupStep: string;
   setupCompletedAt: Date | null;
 }>;
